@@ -154,11 +154,15 @@ export class PrReview extends HTMLElement {
     const diag = h("sl-button", { size: "small", variant: "default" }, h("sl-icon", { slot: "prefix", name: "bug" }), "Diagnóstico");
     const out = h("sl-button", { size: "small", variant: "text" }, `@${this.#login} · Cambiar token`);
     const bar = h("div", { class: "bar" }, select, pick, add, refresh, diag, out);
+    const urlInput = h("sl-input", { placeholder: "Pega la URL de un PR (https://github.com/owner/repo/pull/16) o owner/repo#16", size: "small", clearable: "", autocomplete: "off" }) as unknown as SlInput;
+    const openBtn = h("sl-button", { size: "small", variant: "primary" }, "Abrir PR") as unknown as HTMLElement & SlButton;
+    const openBar = h("div", { class: "bar" }, urlInput, openBtn);
+    openBar.querySelector("sl-input")!.setAttribute("style", "flex:1");
     const list = h("div", { class: "list" });
     const detail = h("div", { class: "detail" }, h("div", { class: "center" }, "Elige un repositorio y un Pull Request."));
     const dialog = this.#manualDialog((reload) => (reload ? void this.#loadRepos(select, detail) : this.#populate(select)));
     const diagDialog = this.#diagnosticDialog();
-    this.#view.replaceChildren(bar, h("div", { class: "cols" }, list, detail), dialog, diagDialog);
+    this.#view.replaceChildren(bar, openBar, h("div", { class: "cols" }, list, detail), dialog, diagDialog);
     this.#view.style.display = "contents";
 
     out.addEventListener("click", () => {
@@ -180,6 +184,41 @@ export class PrReview extends HTMLElement {
       if (v) void this.#loadPulls(v);
       else { list.replaceChildren(); this.#pulls = []; }
     });
+    const openByUrl = async (): Promise<void> => {
+      const m = urlInput.value.trim().match(/^(?:https?:\/\/github\.com\/)?([\w.-]+)\/([\w.-]+)(?:\/pull\/|#)(\d+)/);
+      if (!m) { detail.replaceChildren(h("div", { class: "err" }, "Formato no reconocido. Usa https://github.com/owner/repo/pull/16 o owner/repo#16.")); return; }
+      const [, owner, name, num] = m;
+      const repo = `${owner}/${name}`;
+      openBtn.loading = true;
+      detail.replaceChildren(h("div", { class: "center" }, "Cargando…"));
+      try {
+        const pull = await gh.getPull(store.githubToken, repo, Number(num));
+        void pull;
+        if (!this.#prefs.manual.includes(repo)) this.#prefs.manual.push(repo);
+        this.#savePrefs();
+        this.#allRepos = this.#allRepos.some((r) => r.full_name === repo) ? this.#allRepos : [...this.#allRepos, await gh.getRepo(store.githubToken, repo).catch(() => ({ full_name: repo, private: false }))];
+        this.#prefs.enabled = this.#prefs.enabled && !this.#prefs.enabled.includes(repo) ? [...this.#prefs.enabled, repo] : this.#prefs.enabled;
+        this.#populate(select);
+        await customElements.whenDefined("sl-select");
+        await (select as unknown as { updateComplete: Promise<unknown> }).updateComplete;
+        select.value = repo;
+        this.#repo = repo;
+        try { localStorage.setItem(REPO_KEY, repo); } catch { /* ignorar */ }
+        urlInput.value = "";
+        void this.#loadPulls(repo);
+        await this.#openPull(repo, Number(num));
+      } catch (e) {
+        const status = e instanceof gh.GhError ? e.status : 0;
+        const why = status === 404 || status === 403
+          ? `GitHub responde ${status} para ${repo}#${num}. Con ese código el token no tiene acceso a ese repositorio (si es privado, en GitHub edita el token: Repository access → añade ${repo}; y permisos Pull requests: Read and write, Contents: Read-only). Si el token es de una organización, revisa también el «Resource owner».`
+          : (e as Error).message;
+        detail.replaceChildren(h("div", { class: "err" }, why));
+      } finally {
+        openBtn.loading = false;
+      }
+    };
+    openBtn.addEventListener("click", () => void openByUrl());
+    urlInput.addEventListener("keydown", (e) => { if ((e as KeyboardEvent).key === "Enter") void openByUrl(); });
     void this.#loadRepos(select, detail);
   }
 
