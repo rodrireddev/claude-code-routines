@@ -28,7 +28,7 @@ Botón **Pull requests** al pie de la barra lateral. La primera vez pide un **fi
 - Contents: **Read-only**
 - Metadata: Read-only (automático)
 
-Después eliges un repositorio. Por defecto la lista solo muestra los **privados** que devuelve GitHub para el token (un fine-grained token siempre puede leer repos públicos aunque no se los hayas concedido, así que se ocultan; hay una casilla «Públicos» para verlos y un botón «+» para añadir a mano cualquier `owner/repo`, que se valida contra la API), ves los PRs abiertos, su descripción, reviews existentes y diffs, y puedes **Aprobar**, **Solicitar cambios** o **Comentar** (la review se fija al commit que estabas viendo y pide confirmación). El token solo se envía a `api.github.com` y se guarda con el resto de tus datos locales (cifrado si activaste el cifrado). GitHub no permite aprobar tus propios PRs.
+Después eliges un repositorio: la lista muestra los que GitHub devuelve para el token (privados primero, marcados con 🔒; los públicos llevan «· público»). GitHub no ofrece una llamada que liste «exactamente» los repos concedidos a un fine-grained token (siempre puede leer públicos), así que hay una casilla «Solo privados» y un botón «+» para añadir a mano cualquier `owner/repo`, que se valida contra la API, ves los PRs abiertos, su descripción, reviews existentes y diffs, y puedes **Aprobar**, **Solicitar cambios** o **Comentar** (la review se fija al commit que estabas viendo y pide confirmación). El token solo se envía a `api.github.com` y se guarda con el resto de tus datos locales (cifrado si activaste el cifrado). GitHub no permite aprobar tus propios PRs.
 
 ## Cifrado de datos locales
 

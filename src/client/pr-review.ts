@@ -8,14 +8,14 @@ interface SlSelect extends HTMLElement { value: string | string[]; disabled: boo
 const REPO_KEY = "routine-chat.repo.v1";
 const PREFS_KEY = "routine-chat.repos.v1";
 
-interface RepoPrefs { manual: string[]; showPublic: boolean }
+interface RepoPrefs { manual: string[]; privateOnly: boolean }
 
 function readPrefs(): RepoPrefs {
   try {
     const p = JSON.parse(localStorage.getItem(PREFS_KEY) ?? "{}") as Partial<RepoPrefs>;
-    return { manual: p.manual ?? [], showPublic: p.showPublic ?? false };
+    return { manual: p.manual ?? [], privateOnly: p.privateOnly ?? false };
   } catch {
-    return { manual: [], showPublic: false };
+    return { manual: [], privateOnly: false };
   }
 }
 const MAX_DIFF_LINES = 500;
@@ -145,8 +145,8 @@ export class PrReview extends HTMLElement {
 
   #renderMain(): void {
     const select = h("sl-select", { placeholder: "Elige un repositorio", clearable: "", hoist: "" }) as unknown as SlSelect;
-    const publics = h("sl-checkbox", { size: "small" }, "Públicos") as HTMLElement & { checked: boolean };
-    publics.checked = this.#prefs.showPublic;
+    const publics = h("sl-checkbox", { size: "small" }, "Solo privados") as HTMLElement & { checked: boolean };
+    publics.checked = this.#prefs.privateOnly;
     const add = h("sl-icon-button", { name: "plus-lg", label: "Añadir repositorio manualmente" });
     const refresh = h("sl-icon-button", { name: "arrow-clockwise", label: "Actualizar" });
     const out = h("sl-button", { size: "small", variant: "text" }, `@${this.#login} · Cambiar token`);
@@ -162,7 +162,7 @@ export class PrReview extends HTMLElement {
     });
     add.addEventListener("click", () => (dialog as unknown as { show(): void }).show());
     publics.addEventListener("sl-change", () => {
-      this.#prefs.showPublic = publics.checked;
+      this.#prefs.privateOnly = publics.checked;
       this.#savePrefs();
       this.#populate(select);
     });
@@ -177,21 +177,21 @@ export class PrReview extends HTMLElement {
     void this.#loadRepos(select, detail);
   }
 
-  /** Repos visibles: privados (solo llegan los concedidos al token), públicos si se pide, y los añadidos a mano. */
+  /** Repos visibles: todos los que devuelve GitHub (privados primero) o solo privados si se pide, más los añadidos a mano. */
   #visibleRepos(): GhRepo[] {
     const map = new Map<string, GhRepo>();
-    for (const r of this.#allRepos) if (r.private || this.#prefs.showPublic) map.set(r.full_name, r);
+    for (const r of this.#allRepos) if (r.private || !this.#prefs.privateOnly) map.set(r.full_name, r);
     for (const name of this.#prefs.manual) {
       if (!map.has(name)) map.set(name, this.#allRepos.find((r) => r.full_name === name) ?? { full_name: name, private: false });
     }
-    return [...map.values()].sort((a, b) => a.full_name.localeCompare(b.full_name));
+    return [...map.values()].sort((a, b) => Number(b.private) - Number(a.private) || a.full_name.localeCompare(b.full_name));
   }
 
   #populate(select: SlSelect): void {
     const repos = this.#visibleRepos();
     const manual = new Set(this.#prefs.manual);
     select.replaceChildren(...repos.map((r) =>
-      h("sl-option", { value: r.full_name }, `${r.private ? "🔒 " : ""}${r.full_name}${manual.has(r.full_name) ? " (manual)" : ""}`)));
+      h("sl-option", { value: r.full_name }, `${r.private ? "🔒 " : ""}${r.full_name}${r.private ? "" : " · público"}${manual.has(r.full_name) ? " (manual)" : ""}`)));
     if (this.#repo && !repos.some((r) => r.full_name === this.#repo)) {
       select.value = "";
       this.#repo = "";
@@ -241,7 +241,7 @@ export class PrReview extends HTMLElement {
     input.addEventListener("keydown", (e) => { if ((e as KeyboardEvent).key === "Enter") void submit(); });
     renderItems();
     dialog.append(
-      h("div", { class: "muted", style: "margin-bottom:8px" }, "Un fine-grained token siempre puede leer repos públicos, aunque no se los hayas concedido. La lista automática solo muestra los privados; añade aquí a mano los públicos (u otros) que quieras revisar."),
+      h("div", { class: "muted", style: "margin-bottom:8px" }, "Añade aquí cualquier repositorio (owner/repo) que no salga en la lista automática. Se comprueba con tu token antes de guardarlo."),
       h("div", { style: "display:flex;gap:8px" }, input, addBtn), err, h("div", { style: "margin-top:12px" }, items));
     return dialog;
   }
@@ -261,7 +261,7 @@ export class PrReview extends HTMLElement {
         void this.#loadPulls(saved);
       } else if (repos.length === 0) {
         detail.replaceChildren(h("div", { class: "center" },
-          "No hay repositorios privados accesibles con este token. Añade uno con «+» (owner/repo) o marca «Públicos»."));
+          "GitHub no devolvió ningún repositorio para este token. Añade uno con «+» (owner/repo)."));
       }
     } catch (e) {
       detail.replaceChildren(h("div", { class: "err" }, (e as Error).message));
