@@ -93,7 +93,7 @@ export interface RepoDiscovery { repos: GhRepo[]; warnings: string[] }
  * Junta todo lo que se puede descubrir: /user/repos, los repos de cada organización del usuario
  * y los dueños que el usuario añadió a mano. Los errores parciales se devuelven como avisos.
  */
-export async function discoverRepos(t: string, extraOwners: string[]): Promise<RepoDiscovery> {
+export async function discoverRepos(t: string, extraOwners: string[], login = ""): Promise<RepoDiscovery> {
   const map = new Map<string, GhRepo>();
   const warnings: string[] = [];
   const add = (list: GhRepo[]): void => list.forEach((r) => map.set(r.full_name, r));
@@ -112,7 +112,38 @@ export async function discoverRepos(t: string, extraOwners: string[]): Promise<R
     if (r.status === "fulfilled") add(r.value);
     else warnings.push(`No se pudieron listar los repos de ${owners[i]}: ${(r.reason as Error).message}`);
   });
+
+  // Búsqueda de PRs abiertos: respeta el acceso del token, así que también revela repos privados
+  // (o de organizaciones) que /user/repos no lista.
+  try {
+    const known = new Set(map.keys());
+    const names = await searchPullRepos(t, [...new Set([login, ...extraOwners, ...orgs].filter(Boolean))], login);
+    const missing = names.filter((n) => !known.has(n)).slice(0, 100);
+    const fetched = await Promise.allSettled(missing.map((n) => getRepo(t, n)));
+    fetched.forEach((r) => { if (r.status === "fulfilled") map.set(r.value.full_name, r.value); });
+  } catch (e) {
+    warnings.push(`La búsqueda de PRs falló: ${(e as Error).message}`);
+  }
   return { repos: [...map.values()], warnings };
+}
+
+interface SearchItem { repository_url: string }
+
+/** Repos (owner/name) que tienen PRs abiertos visibles para el token. */
+export async function searchPullRepos(t: string, owners: string[], login: string): Promise<string[]> {
+  const queries = [
+    ...owners.map((o) => `is:pr is:open user:${o}`),
+    ...(login ? [`is:pr is:open involves:${login}`, `is:pr is:open review-requested:${login}`] : []),
+  ];
+  const names = new Set<string>();
+  for (const q of queries) {
+    for (let page = 1; page <= 3; page++) {
+      const res = await gh<{ items: SearchItem[] }>(t, `/search/issues?q=${encodeURIComponent(q)}&per_page=100&page=${page}`);
+      for (const it of res.items) names.add(it.repository_url.replace(/^.*\/repos\//, ""));
+      if (res.items.length < 100) break;
+    }
+  }
+  return [...names];
 }
 
 export const getRepo = (t: string, fullName: string) => gh<GhRepo>(t, `/repos/${fullName}`);

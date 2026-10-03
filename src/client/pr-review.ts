@@ -190,7 +190,7 @@ export class PrReview extends HTMLElement {
     // Modo automático: solo los repos donde la detección confirmó (o no pudo descartar) acceso del token.
     const detected = this.#access.size > 0 && [...this.#access.values()].some((v) => v !== false);
     for (const r of this.#allRepos) {
-      const keep = enabled ? enabled.has(r.full_name) : !detected || this.#access.get(r.full_name) !== false;
+      const keep = enabled ? enabled.has(r.full_name) : !detected || r.private || this.#access.get(r.full_name) !== false;
       if (keep) map.set(r.full_name, r);
     }
     for (const name of this.#prefs.manual.filter((n) => n.includes("/"))) {
@@ -297,6 +297,11 @@ export class PrReview extends HTMLElement {
         else out.push(`  respuesta: ${JSON.stringify(r.body)}`);
         out.push("");
       }
+      for (const q of [`is:pr is:open user:${this.#login}`, `is:pr is:open involves:${this.#login}`]) {
+        const r = await gh.probe(t, `/search/issues?q=${encodeURIComponent(q)}&per_page=100`);
+        const items = ((r.body as { items?: { repository_url: string }[] }).items ?? []).map((i) => i.repository_url.replace(/^.*\/repos\//, ""));
+        out.push(`GET /search/issues?q=${q}\n  estado: ${r.status}\n  PRs abiertos: ${items.length}\n  repos: ${[...new Set(items)].join(", ") || "(ninguno)"}\n`);
+      }
       out.push("Prueba de permiso de Pull requests por repo (403 = sin permiso concedido; 404/422 = con permiso):");
       const repos = this.#allRepos.slice(0, 60).map((r) => r.full_name);
       const statuses = await Promise.all(repos.map((r) => gh.probeReviewStatus(t, r)));
@@ -377,7 +382,7 @@ export class PrReview extends HTMLElement {
     };
     try {
       const owners = this.#prefs.manual.filter((n) => !n.includes("/"));
-      const { repos: found, warnings } = await gh.discoverRepos(store.githubToken, owners);
+      const { repos: found, warnings } = await gh.discoverRepos(store.githubToken, owners, this.#login);
       this.#allRepos = found;
       if (!this.#prefs.enabled) {
         select.disabled = true;
@@ -405,6 +410,10 @@ export class PrReview extends HTMLElement {
         lines.push(this.#access.size && [...this.#access.values()].some((v) => v !== false)
           ? `Detección automática: ${shown} con permiso de Pull requests del token (${confirmed} confirmados).`
           : "La detección no pudo confirmar acceso en ninguno, así que se muestran todos. Revisa «Diagnóstico».");
+      }
+      const priv = found.filter((r) => r.private).length;
+      if (priv === 0) {
+        lines.push("Ningún repositorio privado: GitHub no devuelve ninguno para este token ni en la búsqueda de PRs. Eso ocurre si el token no tiene concedido ningún repo privado: en GitHub → Settings → Developer settings → Fine-grained tokens → tu token, revisa «Resource owner» (tu usuario u organización) y «Repository access» (debe ser «All repositories» u «Only select repositories» con tus privados marcados, no «Public repositories»).");
       }
       lines.push(...warnings);
       placeholder(lines.join("\n"), "center note");
