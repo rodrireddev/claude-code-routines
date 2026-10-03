@@ -15,8 +15,17 @@
   </script>
   <script type="module" data-shoelace="/vendor/shoelace" src="/vendor/shoelace/shoelace.js"></script>
   <style>
+    /* Paleta cálida tipo Claude sobre las variables de Shoelace */
+    :root, :root.sl-theme-dark {
+      --sl-color-primary-50:#fbf1ed; --sl-color-primary-100:#f6e0d7; --sl-color-primary-200:#eec3b1;
+      --sl-color-primary-300:#e4a187; --sl-color-primary-400:#d77f5e; --sl-color-primary-500:#cc6a49;
+      --sl-color-primary-600:#c15f3c; --sl-color-primary-700:#a24d2f; --sl-color-primary-800:#7f3d25;
+      --sl-color-primary-900:#5c2c1b; --sl-color-primary-950:#3a1b10;
+      --sl-input-border-radius-medium:12px;
+      --sl-focus-ring-color:var(--sl-color-primary-300);
+    }
     html, body { height:100%; margin:0; }
-    body { background:var(--sl-color-neutral-50); color:var(--sl-color-neutral-900); font-family:var(--sl-font-sans); font-size:var(--sl-font-size-medium); }
+    body { background:var(--sl-color-neutral-0); color:var(--sl-color-neutral-900); font-family:var(--sl-font-sans); font-size:var(--sl-font-size-medium); }
     routine-chat { height:100%; }
   </style>
 </head>

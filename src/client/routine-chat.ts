@@ -1,119 +1,164 @@
 import "./chat-message.js";
 import "./chat-settings.js";
-import type { ChatMessage, Role, Variant } from "./chat-message.js";
-import type { ChatSettings } from "./chat-settings.js";
-import type { FireResponse } from "./types.js";
+import "./conversation-list.js";
+import { store } from "./store.js";
+import type { ChatMessage } from "./chat-message.js";
+import type { FireResponse, Message, SlButton, SlTextarea } from "./types.js";
 
-/** Subconjunto de la API de los elementos de Shoelace que usamos. */
-interface SlTextarea extends HTMLElement { value: string }
-interface SlButton extends HTMLElement { disabled: boolean; loading: boolean }
-
-/** <routine-chat> — chat completo que dispara la routine vía /api/fire. */
+/** <routine-chat> — aplicación completa: lista de conversaciones + chat de la activa. */
 export class RoutineChat extends HTMLElement {
-  #settings!: ChatSettings;
   #messages!: HTMLDivElement;
-  #form!: HTMLFormElement;
+  #scroller!: HTMLElement;
+  #settings!: HTMLElement & { show(): void };
+  #title!: HTMLElement;
   #input!: SlTextarea;
   #send!: SlButton;
+  /** Conversaciones con una petición en curso (la respuesta se guarda aunque cambies de conversación). */
+  #busy = new Set<string>();
 
   constructor() {
     super();
     this.attachShadow({ mode: "open" }).innerHTML = `
       <style>
-        :host { display:flex; flex-direction:column; height:100%; }
-        header { padding:var(--sl-spacing-medium); background:var(--sl-color-neutral-0); border-bottom:1px solid var(--sl-color-neutral-200); font-weight:var(--sl-font-weight-semibold); font-size:var(--sl-font-size-large); }
-        #messages { flex:1; overflow-y:auto; padding:var(--sl-spacing-medium); display:flex; flex-direction:column; gap:var(--sl-spacing-small); }
-        form { display:flex; gap:var(--sl-spacing-small); align-items:flex-end; padding:var(--sl-spacing-small) var(--sl-spacing-medium); background:var(--sl-color-neutral-0); border-top:1px solid var(--sl-color-neutral-200); }
+        :host { display:flex; height:100%; }
+        conversation-list { width:260px; flex:none; }
+        main { flex:1; min-width:0; display:flex; flex-direction:column; position:relative; }
+        header { display:flex; align-items:center; justify-content:space-between; gap:var(--sl-spacing-small); padding:var(--sl-spacing-x-small) var(--sl-spacing-medium); min-height:52px; }
+        #title { font-weight:var(--sl-font-weight-semibold); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        sl-icon-button { font-size:var(--sl-font-size-large); color:var(--sl-color-neutral-600); }
+        #scroll { flex:1; overflow-y:auto; }
+        #messages { max-width:768px; margin:0 auto; padding:var(--sl-spacing-medium); display:flex; flex-direction:column; gap:var(--sl-spacing-large); }
+        .empty { display:none; flex-direction:column; align-items:center; justify-content:center; gap:var(--sl-spacing-x-small); height:100%; color:var(--sl-color-neutral-500); text-align:center; padding:var(--sl-spacing-large); }
+        .empty .logo { font-size:40px; color:var(--sl-color-primary-600); }
+        .empty h2 { margin:0; font-weight:var(--sl-font-weight-semibold); color:var(--sl-color-neutral-900); }
+        :host(.is-empty) .empty { display:flex; }
+        :host(.is-empty) #messages { display:none; }
+        .composer-wrap { padding:0 var(--sl-spacing-medium) var(--sl-spacing-medium); }
+        .composer { max-width:768px; margin:0 auto; display:flex; align-items:flex-end; gap:var(--sl-spacing-x-small); padding:var(--sl-spacing-x-small) var(--sl-spacing-x-small) var(--sl-spacing-x-small) var(--sl-spacing-medium); background:var(--sl-color-neutral-0); border:1px solid var(--sl-color-neutral-300); border-radius:var(--sl-border-radius-x-large); box-shadow:var(--sl-shadow-medium); }
+        .composer:focus-within { border-color:var(--sl-color-neutral-400); }
         sl-textarea { flex:1; }
+        sl-textarea::part(base) { border:none; background:transparent; box-shadow:none; }
+        sl-textarea::part(textarea) { padding:var(--sl-spacing-x-small) 0; max-height:200px; }
+        .send::part(base) { border-radius:50%; width:36px; height:36px; padding:0; }
+        chat-message a { color:var(--sl-color-primary-600); }
+        .hint { max-width:768px; margin:var(--sl-spacing-x-small) auto 0; text-align:center; font-size:var(--sl-font-size-x-small); color:var(--sl-color-neutral-500); }
       </style>
-      <header>Routine Chat</header>
-      <chat-settings></chat-settings>
-      <div id="messages"></div>
-      <form>
-        <sl-textarea rows="2" resize="none" placeholder="Escribe el texto para la routine… (Enter envía, Shift+Enter nueva línea)"></sl-textarea>
-        <sl-button type="button" variant="primary" size="large">Enviar</sl-button>
-      </form>`;
+      <conversation-list></conversation-list>
+      <main>
+        <header>
+          <div id="title"></div>
+          <sl-icon-button name="gear" label="Configuración"></sl-icon-button>
+        </header>
+        <div id="scroll">
+          <div class="empty"><div class="logo">✦</div><h2>¿Qué routine quieres ejecutar?</h2><div>Escribe un mensaje y se enviará como texto a tu routine.</div></div>
+          <div id="messages"></div>
+        </div>
+        <div class="composer-wrap">
+          <div class="composer">
+            <sl-textarea rows="1" resize="auto" placeholder="Escribe un mensaje para la routine…"></sl-textarea>
+            <sl-button class="send" variant="primary" circle label="Enviar"><sl-icon name="arrow-up" label="Enviar"></sl-icon></sl-button>
+          </div>
+          <div class="hint">Enter envía · Shift+Enter nueva línea</div>
+        </div>
+        <chat-settings></chat-settings>
+      </main>`;
     const root = this.shadowRoot!;
-    this.#settings = root.querySelector("chat-settings") as ChatSettings;
+    this.#title = root.getElementById("title")!;
     this.#messages = root.getElementById("messages") as HTMLDivElement;
-    this.#form = root.querySelector("form")!;
+    this.#scroller = root.getElementById("scroll")!;
+    this.#settings = root.querySelector("chat-settings") as HTMLElement & { show(): void };
     this.#input = root.querySelector("sl-textarea") as SlTextarea;
     this.#send = root.querySelector("sl-button") as SlButton;
   }
 
   connectedCallback(): void {
-    this.#form.addEventListener("submit", (e) => {
-      e.preventDefault();
-      void this.#submit();
-    });
+    this.shadowRoot!.querySelector("header sl-icon-button")!.addEventListener("click", () => this.#settings.show());
     this.#send.addEventListener("click", () => void this.#submit());
     this.#input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && !e.shiftKey) {
+      if ((e as KeyboardEvent).key === "Enter" && !(e as KeyboardEvent).shiftKey) {
         e.preventDefault();
         void this.#submit();
       }
     });
+    store.addEventListener("change", (e) => {
+      const kind = (e as CustomEvent).detail;
+      this.#renderTitle();
+      if (kind !== "meta") this.#renderMessages();
+      if (kind === "active" || kind === "list") this.#updateBusy();
+    });
+    this.#renderTitle();
+    this.#renderMessages();
   }
 
-  #add(role: Role, content: string | Node[], variant: Variant = ""): ChatMessage {
+  #renderTitle(): void {
+    this.#title.textContent = store.active.title || "Nueva conversación";
+  }
+
+  #updateBusy(): void {
+    this.#send.loading = this.#busy.has(store.activeId);
+  }
+
+  #renderMessages(): void {
+    this.#messages.replaceChildren(...store.active.messages.map((m) => this.#element(m)));
+    this.classList.toggle("is-empty", store.active.messages.length === 0);
+    this.#scroller.scrollTop = this.#scroller.scrollHeight;
+  }
+
+  #element(m: Message): ChatMessage {
     const el = document.createElement("chat-message") as ChatMessage;
-    el.setAttribute("role", role);
-    if (variant) el.setAttribute("variant", variant);
-    el.replaceChildren(...(typeof content === "string" ? [content] : content));
-    this.#messages.appendChild(el);
-    this.#scroll();
+    el.setAttribute("role", m.role);
+    if (m.variant) el.setAttribute("variant", m.variant);
+    el.append(m.text);
+    if (m.sessionUrl) {
+      const meta = document.createElement("small");
+      const a = document.createElement("a");
+      a.href = m.sessionUrl;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.textContent = "Ver sesión y respuesta";
+      meta.append(a, m.sessionId ? ` · ${m.sessionId}` : "");
+      el.append(meta);
+    }
     return el;
   }
 
-  #scroll(): void {
-    this.#messages.scrollTop = this.#messages.scrollHeight;
-  }
-
   async #submit(): Promise<void> {
+    const convo = store.active;
     const text = this.#input.value.trim();
-    if (!text || this.#send.loading) return;
+    if (!text || this.#busy.has(convo.id)) return;
     this.#input.value = "";
-    this.#add("user", text);
-    const pending = this.#add("bot", "Ejecutando routine…", "pending");
-    this.#send.loading = true;
+    store.addMessage(convo.id, { role: "user", text });
+    const pending = store.addMessage(convo.id, { role: "bot", text: "Ejecutando routine…", variant: "pending" });
+    this.#busy.add(convo.id);
+    this.#updateBusy();
+    let result: Partial<Message>;
     try {
       const r = await fetch("/api/fire", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, triggerId: this.#settings.triggerId, token: this.#settings.token }),
+        body: JSON.stringify({ text, triggerId: convo.triggerId, token: convo.token }),
       });
-      this.#render(pending, (await r.json()) as FireResponse);
+      result = this.#toMessage((await r.json()) as FireResponse);
     } catch (err) {
-      this.#render(pending, { error: `Error de red: ${(err as Error).message}` });
-    } finally {
-      this.#send.loading = false;
-      this.#input.focus();
-      this.#scroll();
+      result = { text: `Error de red: ${(err as Error).message}`, variant: "error" };
     }
+    this.#busy.delete(convo.id);
+    store.updateMessage(convo.id, pending.id, result);
+    this.#updateBusy();
+    if (store.activeId === convo.id) this.#input.focus();
   }
 
-  #render(el: ChatMessage, res: FireResponse): void {
-    el.removeAttribute("variant");
+  #toMessage(res: FireResponse): Partial<Message> {
     if (res.error || !res.ok) {
-      el.setAttribute("variant", "error");
-      el.replaceChildren(
-        res.error ?? `Error ${res.status}: ${res.data?.error?.message ?? JSON.stringify(res.data)}`,
-      );
-      return;
+      return {
+        variant: "error",
+        text: res.error ?? `Error ${res.status}: ${res.data?.error?.message ?? JSON.stringify(res.data)}`,
+      };
     }
     const { claude_code_session_url: url, claude_code_session_id: id } = res.data ?? {};
-    const meta = document.createElement("small");
-    if (url) {
-      const a = document.createElement("a");
-      a.href = url;
-      a.target = "_blank";
-      a.rel = "noopener noreferrer";
-      a.textContent = "Ver sesión y respuesta";
-      meta.append(a, id ? ` · ${id}` : "");
-    } else {
-      meta.textContent = JSON.stringify(res.data);
-    }
-    el.replaceChildren("Routine lanzada correctamente.", meta);
+    return url
+      ? { text: "Routine lanzada correctamente.", sessionUrl: url, sessionId: id }
+      : { text: `Routine lanzada correctamente. ${JSON.stringify(res.data)}` };
   }
 }
 
