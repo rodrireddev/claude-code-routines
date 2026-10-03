@@ -1,6 +1,7 @@
 import "./chat-message.js";
 import "./chat-settings.js";
 import "./conversation-list.js";
+import "./pr-review.js";
 import { store } from "./store.js";
 import type { ChatMessage } from "./chat-message.js";
 import type { FireResponse, Message, SlButton, SlTextarea } from "./types.js";
@@ -27,6 +28,9 @@ export class RoutineChat extends HTMLElement {
         #title { font-weight:var(--sl-font-weight-semibold); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         .actions { display:flex; }
         sl-icon-button { font-size:var(--sl-font-size-large); color:var(--sl-color-neutral-600); }
+        pr-review { display:none; }
+        :host(.view-prs) pr-review { display:flex; }
+        :host(.view-prs) #scroll, :host(.view-prs) .composer-wrap, :host(.view-prs) #lock, :host(.view-prs) #gear { display:none; }
         #scroll { flex:1; overflow-y:auto; }
         #messages { max-width:768px; margin:0 auto; padding:var(--sl-spacing-medium); display:flex; flex-direction:column; gap:var(--sl-spacing-large); }
         .empty { display:none; flex-direction:column; align-items:center; justify-content:center; gap:var(--sl-spacing-x-small); height:100%; color:var(--sl-color-neutral-500); text-align:center; padding:var(--sl-spacing-large); }
@@ -64,6 +68,7 @@ export class RoutineChat extends HTMLElement {
           </div>
           <div class="hint">Enter envía · Shift+Enter nueva línea</div>
         </div>
+        <pr-review></pr-review>
         <chat-settings></chat-settings>
       </main>`;
     const root = this.shadowRoot!;
@@ -80,6 +85,16 @@ export class RoutineChat extends HTMLElement {
     const lock = root.getElementById("lock")!;
     root.getElementById("gear")!.addEventListener("click", () => this.#settings.show());
     lock.addEventListener("click", () => void store.lock());
+    const list = root.querySelector("conversation-list")!;
+    const setView = (prs: boolean): void => {
+      this.classList.toggle("view-prs", prs);
+      list.toggleAttribute("prs", prs);
+      this.#renderTitle();
+    };
+    list.addEventListener("open-prs", () => setView(true));
+    store.addEventListener("change", (e) => {
+      if ((e as CustomEvent).detail === "active") setView(false);
+    });
     const syncLock = (): void => void (lock.hidden = !store.encrypted);
     store.addEventListener("security", syncLock);
     syncLock();
@@ -101,7 +116,9 @@ export class RoutineChat extends HTMLElement {
   }
 
   #renderTitle(): void {
-    this.#title.textContent = store.active.title || "Nueva conversación";
+    this.#title.textContent = this.classList.contains("view-prs")
+      ? "Pull requests"
+      : store.active.title || "Nueva conversación";
   }
 
   #updateBusy(): void {

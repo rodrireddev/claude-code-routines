@@ -5,6 +5,19 @@ const KEY = "routine-chat.conversations.v1";
 const VAULT_KEY = "routine-chat.vault.v1";
 const ACTIVE_KEY = "routine-chat.active.v1";
 
+/** Lo que se guarda en disco (en claro o dentro del vault cifrado). */
+interface Payload {
+  conversations: Conversation[];
+  githubToken: string;
+}
+
+/** Acepta el formato antiguo (solo un array de conversaciones) y el actual. */
+function parsePayload(raw: unknown): Payload {
+  if (Array.isArray(raw)) return { conversations: raw as Conversation[], githubToken: "" };
+  const o = (raw ?? {}) as Partial<Payload>;
+  return { conversations: o.conversations ?? [], githubToken: o.githubToken ?? "" };
+}
+
 export type ChangeKind = "list" | "active" | "messages" | "meta";
 
 const uid = (): string => crypto.randomUUID();
@@ -33,6 +46,8 @@ function remove(...keys: string[]): void {
  */
 class Store extends EventTarget {
   conversations: Conversation[] = [];
+  /** Fine-grained PAT de GitHub (para revisar PRs). Se guarda igual que el resto de datos. */
+  githubToken = "";
   activeId = "";
   /** true si hay datos cifrados en disco. */
   encrypted: boolean;
@@ -47,7 +62,11 @@ class Store extends EventTarget {
     super();
     this.encrypted = read<Vault | null>(VAULT_KEY, null) !== null;
     this.locked = this.encrypted;
-    if (!this.encrypted) this.#adopt(read<Conversation[]>(KEY, []), true);
+    if (!this.encrypted) {
+      const p = parsePayload(read<unknown>(KEY, []));
+      this.githubToken = p.githubToken;
+      this.#adopt(p.conversations, true);
+    }
   }
 
   #blank(): Conversation {
@@ -87,9 +106,10 @@ class Store extends EventTarget {
   #persist(): void {
     write(ACTIVE_KEY, this.activeId);
     if (this.locked) return;
-    const json = JSON.stringify(this.conversations);
+    const payload: Payload = { conversations: this.conversations, githubToken: this.githubToken };
+    const json = JSON.stringify(payload);
     if (!this.#key) {
-      write(KEY, this.conversations);
+      write(KEY, payload);
       return;
     }
     const key = this.#key;
@@ -106,9 +126,9 @@ class Store extends EventTarget {
     const vault = read<Vault | null>(VAULT_KEY, null);
     if (!vault) throw new Error("No hay datos cifrados");
     const key = await deriveKey(passphrase, vault.salt, vault.iter);
-    let list: Conversation[];
+    let payload: Payload;
     try {
-      list = JSON.parse(await decrypt(key, vault)) as Conversation[];
+      payload = parsePayload(JSON.parse(await decrypt(key, vault)));
     } catch {
       throw new Error("Contraseña incorrecta");
     }
@@ -116,7 +136,8 @@ class Store extends EventTarget {
     this.#salt = vault.salt;
     this.#iter = vault.iter;
     this.locked = false;
-    this.#adopt(list, false);
+    this.githubToken = payload.githubToken;
+    this.#adopt(payload.conversations, false);
   }
 
   /** Activa el cifrado: guarda el vault y elimina todo dato en claro. */
@@ -147,8 +168,15 @@ class Store extends EventTarget {
     await this.#writes;
     this.#key = null;
     this.conversations = [];
+    this.githubToken = "";
     this.locked = true;
     this.dispatchEvent(new Event("lock"));
+  }
+
+  setGithubToken(token: string): void {
+    this.githubToken = token.trim();
+    this.#persist();
+    this.dispatchEvent(new Event("github"));
   }
 
   /** Olvidé la contraseña: borra todo (datos cifrados incluidos) y recarga. */

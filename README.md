@@ -18,6 +18,16 @@ La interfaz es similar a ChatGPT/Claude: lista de conversaciones a la izquierda 
 
 Cada mensaje se envía como `{"text": "..."}`. La respuesta de la API (id y enlace de la sesión creada) se muestra como mensaje del bot.
 
+## Revisar y aprobar Pull Requests (GitHub)
+
+Botón **Pull requests** al pie de la barra lateral. La primera vez pide un **fine-grained personal access token** de GitHub (Settings → Developer settings → Personal access tokens → Fine-grained tokens), limitado a los repos que quieras revisar, con permisos:
+
+- Pull requests: **Read and write**
+- Contents: **Read-only**
+- Metadata: Read-only (automático)
+
+Después eliges un repositorio (los accesibles por el token), ves los PRs abiertos, su descripción, reviews existentes y diffs, y puedes **Aprobar**, **Solicitar cambios** o **Comentar** (la review se fija al commit que estabas viendo y pide confirmación). El token solo se envía a `api.github.com` y se guarda con el resto de tus datos locales (cifrado si activaste el cifrado). GitHub no permite aprobar tus propios PRs.
+
 ## Cifrado de datos locales
 
 Por defecto el historial y los tokens se guardan en claro en `localStorage`. Desde ⚙ → **Seguridad** puedes activar el cifrado con una contraseña:

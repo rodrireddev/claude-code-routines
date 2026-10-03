@@ -14,6 +14,11 @@ export class ConversationList extends HTMLElement {
         .top { padding:var(--sl-spacing-x-small) var(--sl-spacing-small) var(--sl-spacing-small); }
         .top sl-button { width:100%; }
         .top sl-button::part(base) { justify-content:flex-start; background:transparent; border-color:var(--sl-color-neutral-300); }
+        .foot { padding:var(--sl-spacing-x-small) var(--sl-spacing-small); border-top:1px solid var(--sl-color-neutral-200); }
+        .foot sl-button { width:100%; }
+        .foot sl-button::part(base) { justify-content:flex-start; }
+        :host([prs]) .foot sl-button::part(base) { background:var(--sl-color-neutral-200); }
+        :host([prs]) .item.active { background:transparent; font-weight:var(--sl-font-weight-normal); }
         .label { padding:var(--sl-spacing-x-small) var(--sl-spacing-medium); font-size:var(--sl-font-size-x-small); color:var(--sl-color-neutral-500); }
         nav { flex:1; overflow-y:auto; padding:0 var(--sl-spacing-x-small) var(--sl-spacing-small); display:flex; flex-direction:column; gap:2px; }
         .item { display:flex; align-items:center; gap:var(--sl-spacing-2x-small); padding:var(--sl-spacing-x-small) var(--sl-spacing-small); border-radius:var(--sl-border-radius-large); cursor:pointer; }
@@ -27,12 +32,15 @@ export class ConversationList extends HTMLElement {
       <div class="brand"><span>✦</span> Routine Chat</div>
       <div class="top"><sl-button><sl-icon slot="prefix" name="plus-lg"></sl-icon>Nueva conversación</sl-button></div>
       <div class="label">Conversaciones</div>
-      <nav></nav>`;
+      <nav></nav>
+      <div class="foot"><sl-button class="prs" variant="text"><sl-icon slot="prefix" name="github"></sl-icon>Pull requests</sl-button></div>`;
     this.#list = this.shadowRoot!.querySelector("nav")!;
   }
 
   connectedCallback(): void {
     this.shadowRoot!.querySelector("sl-button")!.addEventListener("click", () => store.create());
+    this.shadowRoot!.querySelector(".prs")!.addEventListener("click", () =>
+      this.dispatchEvent(new Event("open-prs", { bubbles: true, composed: true })));
     store.addEventListener("change", () => this.#render());
     this.#render();
   }
