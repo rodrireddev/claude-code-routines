@@ -41,7 +41,10 @@ export class ConversationList extends HTMLElement {
   }
 
   connectedCallback(): void {
-    this.shadowRoot!.querySelector("sl-button")!.addEventListener("click", () => store.create());
+    this.shadowRoot!.querySelector("sl-button")!.addEventListener("click", () => {
+      store.create();
+      this.#openChat();
+    });
     this.shadowRoot!.querySelector(".prs")!.addEventListener("click", () =>
       this.dispatchEvent(new Event("open-prs", { bubbles: true, composed: true })));
     const theme = this.shadowRoot!.querySelector(".theme")!;
@@ -55,6 +58,11 @@ export class ConversationList extends HTMLElement {
     syncTheme();
     store.addEventListener("change", () => this.#render());
     this.#render();
+  }
+
+  /** Pide volver a la vista de chat (p. ej. desde Pull requests), aunque la conversación ya estuviera activa. */
+  #openChat(): void {
+    this.dispatchEvent(new Event("open-chat", { bubbles: true, composed: true }));
   }
 
   #render(): void {
@@ -78,7 +86,10 @@ export class ConversationList extends HTMLElement {
           if (confirm(`¿Eliminar "${c.title || "Sin título"}" y su historial?`)) store.remove(c.id);
         });
         item.append(name, del);
-        item.addEventListener("click", () => store.select(c.id));
+        item.addEventListener("click", () => {
+          store.select(c.id);
+          this.#openChat();
+        });
         return item;
       });
     this.#list.replaceChildren(...items);

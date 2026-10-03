@@ -93,6 +93,7 @@ export class RoutineChat extends HTMLElement {
       this.#renderTitle();
     };
     list.addEventListener("open-prs", () => setView(true));
+    list.addEventListener("open-chat", () => setView(false));
     store.addEventListener("change", (e) => {
       if ((e as CustomEvent).detail === "active") setView(false);
     });
