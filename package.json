@@ -7,8 +7,8 @@
     "build:server": "tsc -p tsconfig.json",
     "build:client": "tsc -p tsconfig.client.json",
     "build": "npm run build:server && npm run build:client",
-    "start": "node --env-file-if-exists=.env dist/server.js",
-    "dev": "npm run build && npm start",
+    "start": "npm run build && node --env-file-if-exists=.env dist/server.js",
+    "dev": "npm start",
     "electron": "npm run build && electron --env-file-if-exists=.env ."
   },
   "devDependencies": {

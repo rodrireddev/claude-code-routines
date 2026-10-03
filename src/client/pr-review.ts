@@ -150,7 +150,7 @@ export class PrReview extends HTMLElement {
     publics.checked = this.#prefs.privateOnly;
     const add = h("sl-icon-button", { name: "plus-lg", label: "Añadir repositorio manualmente" });
     const refresh = h("sl-icon-button", { name: "arrow-clockwise", label: "Actualizar" });
-    const diag = h("sl-icon-button", { name: "bug", label: "Diagnóstico de repositorios" });
+    const diag = h("sl-button", { size: "small", variant: "default" }, h("sl-icon", { slot: "prefix", name: "bug" }), "Diagnóstico");
     const out = h("sl-button", { size: "small", variant: "text" }, `@${this.#login} · Cambiar token`);
     const bar = h("div", { class: "bar" }, select, publics, add, refresh, diag, out);
     const list = h("div", { class: "list" });
