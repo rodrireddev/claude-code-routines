@@ -1,3 +1,5 @@
+<p align="center"><img src="public/assets/logo-128.png" width="96" alt="Routine Chat" /></p>
+
 # Routine Chat
 
 Mini web app en TypeScript que dispara una Claude Code Routine (`POST /v1/claude_code/routines/<id>/fire`) desde una interfaz tipo chat. El token vive solo en el servidor local (no se envía a terceros).

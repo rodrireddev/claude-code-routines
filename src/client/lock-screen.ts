@@ -13,14 +13,14 @@ export class LockScreen extends HTMLElement {
       <style>
         :host { display:grid; place-items:center; height:100%; padding:var(--sl-spacing-large); }
         .card { width:min(380px,100%); display:grid; gap:var(--sl-spacing-medium); text-align:center; }
-        .logo { font-size:40px; color:var(--sl-color-primary-600); }
+        .logo { justify-self:center; border-radius:50%; }
         h2 { margin:0; font-weight:var(--sl-font-weight-semibold); }
         p { margin:0; color:var(--sl-color-neutral-500); }
         .err { color:var(--sl-color-danger-600); font-size:var(--sl-font-size-small); min-height:1.2em; }
         .link::part(base) { font-size:var(--sl-font-size-small); color:var(--sl-color-neutral-500); }
       </style>
       <div class="card">
-        <div class="logo">🔒</div>
+        <img class="logo" src="/assets/logo-128.png" alt="" width="72" height="72" />
         <h2>Datos cifrados</h2>
         <p>Introduce tu contraseña para abrir tus conversaciones.</p>
         <sl-input type="password" placeholder="Contraseña" password-toggle autocomplete="current-password"></sl-input>

@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, shell } from "electron";
 import { startServer } from "../app.js";
 
@@ -9,6 +10,7 @@ async function createWindow(): Promise<void> {
     width: 900,
     height: 720,
     title: "Routine Chat",
+    icon: fileURLToPath(new URL("../../public/assets/logo-512.png", import.meta.url)),
     webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false },
   });
   win.setMenuBarVisibility(false);

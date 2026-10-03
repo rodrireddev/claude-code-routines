@@ -27,6 +27,7 @@ export class RoutineChat extends HTMLElement {
         header { display:flex; align-items:center; justify-content:space-between; gap:var(--sl-spacing-small); padding:var(--sl-spacing-x-small) var(--sl-spacing-medium); min-height:52px; }
         #title { font-weight:var(--sl-font-weight-semibold); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
         .actions { display:flex; }
+        [hidden] { display:none !important; }
         sl-icon-button { font-size:var(--sl-font-size-large); color:var(--sl-color-neutral-600); }
         pr-review { display:none; }
         :host(.view-prs) pr-review { display:flex; }
@@ -34,7 +35,7 @@ export class RoutineChat extends HTMLElement {
         #scroll { flex:1; overflow-y:auto; }
         #messages { max-width:768px; margin:0 auto; padding:var(--sl-spacing-medium); display:flex; flex-direction:column; gap:var(--sl-spacing-large); }
         .empty { display:none; flex-direction:column; align-items:center; justify-content:center; gap:var(--sl-spacing-x-small); height:100%; color:var(--sl-color-neutral-500); text-align:center; padding:var(--sl-spacing-large); }
-        .empty .logo { font-size:40px; color:var(--sl-color-primary-600); }
+        .empty .logo { border-radius:50%; margin-bottom:var(--sl-spacing-x-small); }
         .empty h2 { margin:0; font-weight:var(--sl-font-weight-semibold); color:var(--sl-color-neutral-900); }
         :host(.is-empty) .empty { display:flex; }
         :host(.is-empty) #messages { display:none; }
@@ -58,7 +59,7 @@ export class RoutineChat extends HTMLElement {
           </div>
         </header>
         <div id="scroll">
-          <div class="empty"><div class="logo">✦</div><h2>¿Qué routine quieres ejecutar?</h2><div>Escribe un mensaje y se enviará como texto a tu routine.</div></div>
+          <div class="empty"><img class="logo" src="/assets/logo-128.png" alt="" width="72" height="72" /><h2>¿Qué routine quieres ejecutar?</h2><div>Escribe un mensaje y se enviará como texto a tu routine.</div></div>
           <div id="messages"></div>
         </div>
         <div class="composer-wrap">

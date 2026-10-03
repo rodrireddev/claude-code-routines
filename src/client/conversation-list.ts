@@ -11,7 +11,7 @@ export class ConversationList extends HTMLElement {
       <style>
         :host { display:flex; flex-direction:column; height:100%; background:var(--sl-color-neutral-100); }
         .brand { padding:var(--sl-spacing-medium) var(--sl-spacing-medium) var(--sl-spacing-x-small); font-weight:var(--sl-font-weight-semibold); display:flex; align-items:center; gap:var(--sl-spacing-x-small); }
-        .brand span { color:var(--sl-color-primary-600); }
+        .brand img { border-radius:50%; }
         .top { padding:var(--sl-spacing-x-small) var(--sl-spacing-small) var(--sl-spacing-small); }
         .top sl-button { width:100%; }
         .top sl-button::part(base) { justify-content:flex-start; background:transparent; border-color:var(--sl-color-neutral-300); }
@@ -32,7 +32,7 @@ export class ConversationList extends HTMLElement {
         .item sl-icon-button { font-size:var(--sl-font-size-medium); opacity:0; }
         .item:hover sl-icon-button, .item.active sl-icon-button { opacity:1; }
       </style>
-      <div class="brand"><span>✦</span> Routine Chat</div>
+      <div class="brand"><img src="/assets/logo-128.png" alt="" width="28" height="28" /> Routine Chat</div>
       <div class="top"><sl-button><sl-icon slot="prefix" name="plus-lg"></sl-icon>Nueva conversación</sl-button></div>
       <div class="label">Conversaciones</div>
       <nav></nav>
