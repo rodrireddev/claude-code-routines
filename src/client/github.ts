@@ -55,9 +55,21 @@ async function gh<T>(token: string, path: string, init: RequestInit = {}): Promi
 
 export const getUser = (t: string) => gh<{ login: string }>(t, "/user");
 
-/** Repositorios a los que el token tiene acceso. */
-export const listRepos = (t: string) =>
-  gh<GhRepo[]>(t, "/user/repos?per_page=100&sort=pushed&affiliation=owner,collaborator,organization_member");
+/**
+ * Repositorios que devuelve GitHub para el token. Ojo: un fine-grained token siempre puede leer
+ * repos públicos, así que esta lista incluye públicos aunque no estén concedidos al token.
+ */
+export async function listRepos(t: string): Promise<GhRepo[]> {
+  const all: GhRepo[] = [];
+  for (let page = 1; page <= 5; page++) {
+    const chunk = await gh<GhRepo[]>(t, `/user/repos?per_page=100&page=${page}&sort=pushed&affiliation=owner,collaborator,organization_member`);
+    all.push(...chunk);
+    if (chunk.length < 100) break;
+  }
+  return all;
+}
+
+export const getRepo = (t: string, fullName: string) => gh<GhRepo>(t, `/repos/${fullName}`);
 
 export const listPulls = (t: string, repo: string) =>
   gh<GhPull[]>(t, `/repos/${repo}/pulls?state=open&per_page=50&sort=updated&direction=desc`);
