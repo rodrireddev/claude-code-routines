@@ -141,3 +141,22 @@ export const submitReview = (t: string, repo: string, n: number, event: ReviewEv
     method: "POST",
     body: JSON.stringify({ event, body: body || undefined, commit_id: commitId }),
   });
+
+export interface Probe { path: string; status: number; headers: Record<string, string>; body: unknown }
+
+/** Llamada cruda para el diagnóstico: devuelve estado, cabeceras relevantes y cuerpo, sin lanzar. */
+export async function probe(t: string, path: string): Promise<Probe> {
+  try {
+    const res = await fetch(API + path, {
+      headers: { Authorization: `Bearer ${t}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" },
+    });
+    const keep = ["x-accepted-github-permissions", "x-oauth-scopes", "github-authentication-token-expiration", "x-ratelimit-remaining"];
+    const headers: Record<string, string> = {};
+    for (const k of keep) { const v = res.headers.get(k); if (v) headers[k] = v; }
+    let body: unknown = null;
+    try { body = await res.json(); } catch { /* sin cuerpo */ }
+    return { path, status: res.status, headers, body };
+  } catch (e) {
+    return { path, status: 0, headers: {}, body: (e as Error).message };
+  }
+}

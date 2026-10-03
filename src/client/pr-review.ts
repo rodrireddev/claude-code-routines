@@ -150,17 +150,20 @@ export class PrReview extends HTMLElement {
     publics.checked = this.#prefs.privateOnly;
     const add = h("sl-icon-button", { name: "plus-lg", label: "Añadir repositorio manualmente" });
     const refresh = h("sl-icon-button", { name: "arrow-clockwise", label: "Actualizar" });
+    const diag = h("sl-icon-button", { name: "bug", label: "Diagnóstico de repositorios" });
     const out = h("sl-button", { size: "small", variant: "text" }, `@${this.#login} · Cambiar token`);
-    const bar = h("div", { class: "bar" }, select, publics, add, refresh, out);
+    const bar = h("div", { class: "bar" }, select, publics, add, refresh, diag, out);
     const list = h("div", { class: "list" });
     const detail = h("div", { class: "detail" }, h("div", { class: "center" }, "Elige un repositorio y un Pull Request."));
     const dialog = this.#manualDialog((reload) => (reload ? void this.#loadRepos(select, detail) : this.#populate(select)));
-    this.#view.replaceChildren(bar, h("div", { class: "cols" }, list, detail), dialog);
+    const diagDialog = this.#diagnosticDialog();
+    this.#view.replaceChildren(bar, h("div", { class: "cols" }, list, detail), dialog, diagDialog);
     this.#view.style.display = "contents";
 
     out.addEventListener("click", () => {
       if (confirm("¿Quitar el token de GitHub guardado?")) store.setGithubToken("");
     });
+    diag.addEventListener("click", () => (diagDialog as unknown as { show(): void }).show());
     add.addEventListener("click", () => (dialog as unknown as { show(): void }).show());
     publics.addEventListener("sl-change", () => {
       this.#prefs.privateOnly = publics.checked;
@@ -199,6 +202,41 @@ export class PrReview extends HTMLElement {
       this.#listEl.replaceChildren();
       this.#detailEl.replaceChildren(h("div", { class: "center" }, "Elige un repositorio y un Pull Request."));
     }
+  }
+
+  /** Muestra qué responde GitHub (sin el token) para entender por qué faltan repositorios. */
+  #diagnosticDialog(): HTMLElement {
+    const dialog = h("sl-dialog", { label: "Diagnóstico de repositorios", style: "--width:min(720px,95vw)" });
+    const pre = h("pre", { style: "white-space:pre-wrap;word-break:break-word;font:12px/1.5 var(--sl-font-mono);max-height:55vh;overflow:auto;margin:0" });
+    const run = async (): Promise<void> => {
+      pre.textContent = "Consultando GitHub…";
+      const t = store.githubToken;
+      const names = (b: unknown): string[] => (Array.isArray(b) ? (b as { full_name?: string; login?: string; private?: boolean }[]).map((x) => `${x.private ? "[privado] " : ""}${x.full_name ?? x.login}`) : []);
+      const paths = [
+        "/user",
+        "/user/repos?per_page=100&affiliation=owner,collaborator,organization_member",
+        "/user/repos?per_page=100&visibility=private",
+        "/user/orgs?per_page=100",
+        "/user/memberships/orgs?per_page=100",
+      ];
+      const out: string[] = [];
+      for (const path of paths) {
+        const r = await gh.probe(t, path);
+        const list = names(r.body);
+        out.push(`GET ${path}\n  estado: ${r.status}`);
+        for (const [k, v] of Object.entries(r.headers)) out.push(`  ${k}: ${v}`);
+        if (r.status === 200 && path === "/user") out.push(`  usuario: ${(r.body as { login?: string }).login}`);
+        else if (r.status === 200) out.push(`  resultados: ${list.length}${list.length ? "\n    " + list.slice(0, 40).join("\n    ") : ""}`);
+        else out.push(`  respuesta: ${JSON.stringify(r.body)}`);
+        out.push("");
+      }
+      pre.textContent = out.join("\n");
+    };
+    const again = h("sl-button", { slot: "footer", variant: "primary" }, "Volver a ejecutar");
+    again.addEventListener("click", () => void run());
+    dialog.append(h("div", { class: "muted", style: "margin-bottom:8px" }, "Respuestas crudas de GitHub para tu token (el token no se muestra)."), pre, again);
+    dialog.addEventListener("sl-after-show", () => void run());
+    return dialog;
   }
 
   /** Diálogo para añadir/quitar repositorios a mano (p. ej. públicos concedidos al token). */
