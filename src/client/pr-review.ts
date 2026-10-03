@@ -8,14 +8,14 @@ interface SlSelect extends HTMLElement { value: string | string[]; disabled: boo
 const REPO_KEY = "routine-chat.repo.v1";
 const PREFS_KEY = "routine-chat.repos.v1";
 
-interface RepoPrefs { manual: string[]; privateOnly: boolean }
+interface RepoPrefs { manual: string[]; /** null = mostrar todos los que devuelve GitHub */ enabled: string[] | null }
 
 function readPrefs(): RepoPrefs {
   try {
     const p = JSON.parse(localStorage.getItem(PREFS_KEY) ?? "{}") as Partial<RepoPrefs>;
-    return { manual: p.manual ?? [], privateOnly: p.privateOnly ?? false };
+    return { manual: p.manual ?? [], enabled: p.enabled ?? null };
   } catch {
-    return { manual: [], privateOnly: false };
+    return { manual: [], enabled: null };
   }
 }
 const MAX_DIFF_LINES = 500;
@@ -146,13 +146,12 @@ export class PrReview extends HTMLElement {
 
   #renderMain(): void {
     const select = h("sl-select", { placeholder: "Elige un repositorio", clearable: "", hoist: "" }) as unknown as SlSelect;
-    const publics = h("sl-checkbox", { size: "small" }, "Solo privados") as HTMLElement & { checked: boolean };
-    publics.checked = this.#prefs.privateOnly;
+    const pick = h("sl-button", { size: "small", variant: "primary", outline: "" }, h("sl-icon", { slot: "prefix", name: "list-check" }), "Elegir repos");
     const add = h("sl-icon-button", { name: "plus-lg", label: "Añadir repositorio manualmente" });
     const refresh = h("sl-icon-button", { name: "arrow-clockwise", label: "Actualizar" });
     const diag = h("sl-button", { size: "small", variant: "default" }, h("sl-icon", { slot: "prefix", name: "bug" }), "Diagnóstico");
     const out = h("sl-button", { size: "small", variant: "text" }, `@${this.#login} · Cambiar token`);
-    const bar = h("div", { class: "bar" }, select, publics, add, refresh, diag, out);
+    const bar = h("div", { class: "bar" }, select, pick, add, refresh, diag, out);
     const list = h("div", { class: "list" });
     const detail = h("div", { class: "detail" }, h("div", { class: "center" }, "Elige un repositorio y un Pull Request."));
     const dialog = this.#manualDialog((reload) => (reload ? void this.#loadRepos(select, detail) : this.#populate(select)));
@@ -165,10 +164,11 @@ export class PrReview extends HTMLElement {
     });
     diag.addEventListener("click", () => (diagDialog as unknown as { show(): void }).show());
     add.addEventListener("click", () => (dialog as unknown as { show(): void }).show());
-    publics.addEventListener("sl-change", () => {
-      this.#prefs.privateOnly = publics.checked;
-      this.#savePrefs();
-      this.#populate(select);
+    pick.addEventListener("click", () => {
+      const d = this.#pickDialog(() => this.#populate(select));
+      this.#view.append(d);
+      d.addEventListener("sl-after-hide", () => d.remove());
+      (d as unknown as { show(): void }).show();
     });
     refresh.addEventListener("click", () => this.#repo && void this.#loadPulls(this.#repo));
     select.addEventListener("sl-change", () => {
@@ -181,10 +181,11 @@ export class PrReview extends HTMLElement {
     void this.#loadRepos(select, detail);
   }
 
-  /** Repos visibles: todos los que devuelve GitHub (privados primero) o solo privados si se pide, más los añadidos a mano. */
+  /** Repos visibles: los elegidos por el usuario (o todos si no eligió), más los añadidos a mano. */
   #visibleRepos(): GhRepo[] {
     const map = new Map<string, GhRepo>();
-    for (const r of this.#allRepos) if (r.private || !this.#prefs.privateOnly) map.set(r.full_name, r);
+    const enabled = this.#prefs.enabled ? new Set(this.#prefs.enabled) : null;
+    for (const r of this.#allRepos) if (!enabled || enabled.has(r.full_name)) map.set(r.full_name, r);
     for (const name of this.#prefs.manual.filter((n) => n.includes("/"))) {
       if (!map.has(name)) map.set(name, this.#allRepos.find((r) => r.full_name === name) ?? { full_name: name, private: false });
     }
@@ -202,6 +203,51 @@ export class PrReview extends HTMLElement {
       this.#listEl.replaceChildren();
       this.#detailEl.replaceChildren(h("div", { class: "center" }, "Elige un repositorio y un Pull Request."));
     }
+  }
+
+  /** Diálogo para elegir qué repos mostrar (GitHub no dice cuáles se concedieron al token). */
+  #pickDialog(onChange: () => void): HTMLElement {
+    const dialog = h("sl-dialog", { label: "Elegir repositorios" });
+    const all = [...this.#allRepos].sort((a, b) => Number(b.private) - Number(a.private) || a.full_name.localeCompare(b.full_name));
+    const current = this.#prefs.enabled ? new Set(this.#prefs.enabled) : new Set(all.map((r) => r.full_name));
+    const boxes = all.map((r) => {
+      const cb = h("sl-checkbox", {}, `${r.private ? "🔒 " : ""}${r.full_name}${r.private ? "" : " · público"}`) as HTMLElement & { checked: boolean };
+      cb.checked = current.has(r.full_name);
+      cb.dataset.repo = r.full_name;
+      return cb;
+    });
+    const status = h("div", { class: "muted" });
+    const setAll = (v: boolean): void => boxes.forEach((b) => (b.checked = v));
+    const allBtn = h("sl-button", { size: "small" }, "Todos");
+    const noneBtn = h("sl-button", { size: "small" }, "Ninguno");
+    const detect = h("sl-button", { size: "small" }, "Detectar los del token (experimental)") as HTMLElement & SlButton;
+    allBtn.addEventListener("click", () => setAll(true));
+    noneBtn.addEventListener("click", () => setAll(false));
+    detect.addEventListener("click", async () => {
+      detect.loading = true;
+      status.textContent = "Comprobando permisos de cada repositorio…";
+      const results = await Promise.all(all.map((r) => gh.probeReviewAccess(store.githubToken, r.full_name)));
+      boxes.forEach((b, i) => { if (results[i] !== null) b.checked = results[i] === true; });
+      const n = results.filter((x) => x === true).length;
+      const u = results.filter((x) => x === null).length;
+      status.textContent = `Con permiso de Pull requests en ${n} de ${all.length} repos${u ? ` (${u} no concluyentes, sin cambiar)` : ""}. Revisa la selección y guarda.`;
+      detect.loading = false;
+    });
+    const save = h("sl-button", { slot: "footer", variant: "primary" }, "Guardar");
+    save.addEventListener("click", () => {
+      const sel = boxes.filter((b) => b.checked).map((b) => b.dataset.repo!);
+      this.#prefs.enabled = sel.length === all.length ? null : sel;
+      this.#savePrefs();
+      onChange();
+      (dialog as unknown as { hide(): void }).hide();
+    });
+    dialog.append(
+      h("div", { class: "muted", style: "margin-bottom:8px" }, "GitHub no indica qué repos concediste a un fine-grained token (siempre puede leer los públicos). Marca los que quieras ver en la lista."),
+      h("div", { style: "display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px" }, allBtn, noneBtn, detect),
+      status,
+      h("div", { style: "display:grid;gap:6px;margin-top:8px;max-height:40vh;overflow:auto" }, ...boxes),
+      save);
+    return dialog;
   }
 
   /** Muestra qué responde GitHub (sin el token) para entender por qué faltan repositorios. */
@@ -309,11 +355,11 @@ export class PrReview extends HTMLElement {
       }
       const priv = found.filter((r) => r.private).length;
       const lines = [`GitHub devolvió ${found.length} repositorios (${priv} privados).`];
-      if (priv === 0) {
-        lines.push("Si esperabas ver privados: el token debe ser fine-grained con «All repositories» o «Only select repositories» (no «Public repositories»); si su dueño es una organización, un owner debe aprobarlo. También puedes pulsar «+» y escribir el nombre de la organización o un owner/repo.");
+      if (!this.#prefs.enabled) {
+        lines.push("GitHub no indica cuáles concediste al token (siempre puede leer los públicos). Pulsa «Elegir repos» para marcar los que quieres ver; ahí hay un detector experimental.");
       }
       lines.push(...warnings);
-      placeholder(lines.join("\n"), warnings.length || priv === 0 ? "center note" : "center");
+      placeholder(lines.join("\n"), "center note");
     } catch (e) {
       detail.replaceChildren(h("div", { class: "err" }, (e as Error).message));
     }
