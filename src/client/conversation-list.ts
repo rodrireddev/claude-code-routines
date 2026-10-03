@@ -29,7 +29,7 @@ export class ConversationList extends HTMLElement {
         .item.active { background:var(--sl-color-neutral-200); font-weight:var(--sl-font-weight-semibold); }
         .name { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
         .name small { display:block; font-weight:var(--sl-font-weight-normal); color:var(--sl-color-neutral-500); font-size:var(--sl-font-size-x-small); }
-        sl-icon-button { font-size:var(--sl-font-size-medium); opacity:0; }
+        .item sl-icon-button { font-size:var(--sl-font-size-medium); opacity:0; }
         .item:hover sl-icon-button, .item.active sl-icon-button { opacity:1; }
       </style>
       <div class="brand"><span>✦</span> Routine Chat</div>
