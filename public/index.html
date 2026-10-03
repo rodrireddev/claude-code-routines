@@ -5,13 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Routine Chat</title>
   <link rel="stylesheet" href="/vendor/shoelace/themes/light.css" />
-  <link rel="stylesheet" href="/vendor/shoelace/themes/dark.css" media="(prefers-color-scheme: dark)" />
+  <link rel="stylesheet" href="/vendor/shoelace/themes/dark.css" />
   <script>
-    // Shoelace usa la clase sl-theme-dark para el modo oscuro; la sincronizamos con el sistema.
-    const mq = matchMedia("(prefers-color-scheme: dark)");
-    const apply = () => document.documentElement.classList.toggle("sl-theme-dark", mq.matches);
-    apply();
-    mq.addEventListener("change", apply);
+    // Evita el parpadeo: aplica el tema guardado antes de pintar (la lógica completa está en theme.ts).
+    try {
+      const m = localStorage.getItem("routine-chat.theme.v1") || "system";
+      const dark = m === "dark" || (m === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+      document.documentElement.classList.toggle("sl-theme-dark", dark);
+    } catch {}
   </script>
   <script type="module" data-shoelace="/vendor/shoelace" src="/vendor/shoelace/shoelace.js"></script>
   <style>

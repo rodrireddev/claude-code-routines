@@ -1,3 +1,4 @@
+import "./theme.js";
 import "./lock-screen.js";
 import "./routine-chat.js";
 import { store } from "./store.js";

@@ -1,4 +1,5 @@
 import { store } from "./store.js";
+import { cycleTheme, getTheme, type ThemeMode } from "./theme.js";
 
 /** <conversation-list> — barra lateral con las conversaciones guardadas. */
 export class ConversationList extends HTMLElement {
@@ -15,7 +16,9 @@ export class ConversationList extends HTMLElement {
         .top sl-button { width:100%; }
         .top sl-button::part(base) { justify-content:flex-start; background:transparent; border-color:var(--sl-color-neutral-300); }
         .foot { padding:var(--sl-spacing-x-small) var(--sl-spacing-small); border-top:1px solid var(--sl-color-neutral-200); }
-        .foot sl-button { width:100%; }
+        .foot { display:flex; align-items:center; gap:var(--sl-spacing-2x-small); }
+        .foot .prs { flex:1; }
+        .theme { font-size:var(--sl-font-size-large); color:var(--sl-color-neutral-600); }
         .foot sl-button::part(base) { justify-content:flex-start; }
         :host([prs]) .foot sl-button::part(base) { background:var(--sl-color-neutral-200); }
         :host([prs]) .item.active { background:transparent; font-weight:var(--sl-font-weight-normal); }
@@ -33,7 +36,7 @@ export class ConversationList extends HTMLElement {
       <div class="top"><sl-button><sl-icon slot="prefix" name="plus-lg"></sl-icon>Nueva conversación</sl-button></div>
       <div class="label">Conversaciones</div>
       <nav></nav>
-      <div class="foot"><sl-button class="prs" variant="text"><sl-icon slot="prefix" name="github"></sl-icon>Pull requests</sl-button></div>`;
+      <div class="foot"><sl-button class="prs" variant="text"><sl-icon slot="prefix" name="github"></sl-icon>Pull requests</sl-button><sl-icon-button class="theme" name="circle-half"></sl-icon-button></div>`;
     this.#list = this.shadowRoot!.querySelector("nav")!;
   }
 
@@ -41,6 +44,15 @@ export class ConversationList extends HTMLElement {
     this.shadowRoot!.querySelector("sl-button")!.addEventListener("click", () => store.create());
     this.shadowRoot!.querySelector(".prs")!.addEventListener("click", () =>
       this.dispatchEvent(new Event("open-prs", { bubbles: true, composed: true })));
+    const theme = this.shadowRoot!.querySelector(".theme")!;
+    const syncTheme = (): void => {
+      const mode: ThemeMode = getTheme();
+      theme.setAttribute("name", { system: "circle-half", light: "sun", dark: "moon" }[mode]);
+      theme.setAttribute("label", { system: "Tema: sistema", light: "Tema: claro", dark: "Tema: oscuro" }[mode]);
+    };
+    theme.addEventListener("click", () => void cycleTheme());
+    window.addEventListener("themechange", syncTheme);
+    syncTheme();
     store.addEventListener("change", () => this.#render());
     this.#render();
   }
