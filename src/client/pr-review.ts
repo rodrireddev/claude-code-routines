@@ -212,7 +212,17 @@ export class PrReview extends HTMLElement {
         const why = status === 404 || status === 403
           ? `GitHub responde ${status} para ${repo}#${num}. Con ese código el token no tiene acceso a ese repositorio (si es privado, en GitHub edita el token: Repository access → añade ${repo}; y permisos Pull requests: Read and write, Contents: Read-only). Si el token es de una organización, revisa también el «Resource owner».`
           : (e as Error).message;
-        detail.replaceChildren(h("div", { class: "err" }, why));
+        const t = store.githubToken;
+        const kind = t.startsWith("github_pat_") ? "fine-grained (github_pat_…)" : t.startsWith("ghp_") ? "classic (ghp_…)" : "desconocido";
+        const lines = [why, "", `Token en uso: ${kind}, termina en …${t.slice(-4)}`];
+        if (status === 404 || status === 403) {
+          for (const path of [`/repos/${repo}`, `/repos/${repo}/pulls/${num}`]) {
+            const r = await gh.probe(t, path);
+            const msg = (r.body as { message?: string } | null)?.message ?? "";
+            lines.push(`GET ${path} → ${r.status} ${msg}${r.headers["x-accepted-github-permissions"] ? ` (permisos que pide: ${r.headers["x-accepted-github-permissions"]})` : ""}`);
+          }
+        }
+        detail.replaceChildren(h("div", { class: "err" }, lines.join("\n")));
       } finally {
         openBtn.loading = false;
       }
