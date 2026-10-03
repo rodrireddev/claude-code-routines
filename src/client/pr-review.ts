@@ -71,6 +71,7 @@ export class PrReview extends HTMLElement {
         .form { display:grid; gap:var(--sl-spacing-small); position:sticky; bottom:0; background:var(--sl-color-neutral-0); padding:var(--sl-spacing-small) 0; border-top:1px solid var(--sl-color-neutral-200); }
         .actions { display:flex; gap:var(--sl-spacing-small); flex-wrap:wrap; }
         .ok { color:var(--sl-color-success-700); font-size:var(--sl-font-size-small); }
+        .note { white-space:pre-wrap; max-width:560px; margin:auto; }
         .center { margin:auto; text-align:center; color:var(--sl-color-neutral-500); padding:var(--sl-spacing-large); }
         @media (max-width:800px) { .list { width:200px; } }
       </style>
@@ -153,7 +154,7 @@ export class PrReview extends HTMLElement {
     const bar = h("div", { class: "bar" }, select, publics, add, refresh, out);
     const list = h("div", { class: "list" });
     const detail = h("div", { class: "detail" }, h("div", { class: "center" }, "Elige un repositorio y un Pull Request."));
-    const dialog = this.#manualDialog(() => this.#populate(select));
+    const dialog = this.#manualDialog((reload) => (reload ? void this.#loadRepos(select, detail) : this.#populate(select)));
     this.#view.replaceChildren(bar, h("div", { class: "cols" }, list, detail), dialog);
     this.#view.style.display = "contents";
 
@@ -181,7 +182,7 @@ export class PrReview extends HTMLElement {
   #visibleRepos(): GhRepo[] {
     const map = new Map<string, GhRepo>();
     for (const r of this.#allRepos) if (r.private || !this.#prefs.privateOnly) map.set(r.full_name, r);
-    for (const name of this.#prefs.manual) {
+    for (const name of this.#prefs.manual.filter((n) => n.includes("/"))) {
       if (!map.has(name)) map.set(name, this.#allRepos.find((r) => r.full_name === name) ?? { full_name: name, private: false });
     }
     return [...map.values()].sort((a, b) => Number(b.private) - Number(a.private) || a.full_name.localeCompare(b.full_name));
@@ -189,7 +190,7 @@ export class PrReview extends HTMLElement {
 
   #populate(select: SlSelect): void {
     const repos = this.#visibleRepos();
-    const manual = new Set(this.#prefs.manual);
+    const manual = new Set(this.#prefs.manual.filter((n) => n.includes("/")));
     select.replaceChildren(...repos.map((r) =>
       h("sl-option", { value: r.full_name }, `${r.private ? "🔒 " : ""}${r.full_name}${r.private ? "" : " · público"}${manual.has(r.full_name) ? " (manual)" : ""}`)));
     if (this.#repo && !repos.some((r) => r.full_name === this.#repo)) {
@@ -201,9 +202,9 @@ export class PrReview extends HTMLElement {
   }
 
   /** Diálogo para añadir/quitar repositorios a mano (p. ej. públicos concedidos al token). */
-  #manualDialog(onChange: () => void): HTMLElement {
+  #manualDialog(onChange: (reload: boolean) => void): HTMLElement {
     const dialog = h("sl-dialog", { label: "Repositorios manuales" });
-    const input = h("sl-input", { placeholder: "owner/repo", autocomplete: "off" }) as unknown as SlInput;
+    const input = h("sl-input", { placeholder: "owner/repo  ·  u  ·  organización", autocomplete: "off" }) as unknown as SlInput;
     const err = h("div", { class: "err" });
     const addBtn = h("sl-button", { variant: "primary" }, "Añadir") as unknown as HTMLElement & SlButton;
     const items = h("div", { style: "display:grid;gap:4px" });
@@ -214,23 +215,26 @@ export class PrReview extends HTMLElement {
           this.#prefs.manual = this.#prefs.manual.filter((n) => n !== name);
           this.#savePrefs();
           renderItems();
-          onChange();
+          onChange(!name.includes("/"));
         });
         return h("div", { style: "display:flex;align-items:center;justify-content:space-between" }, h("span", {}, name), del);
       }));
     };
     const submit = async (): Promise<void> => {
       const name = input.value.trim().replace(/^https?:\/\/github\.com\//, "").replace(/\/$/, "");
-      if (!/^[\w.-]+\/[\w.-]+$/.test(name)) { err.textContent = "Usa el formato owner/repo."; return; }
+      const isRepo = /^[\w.-]+\/[\w.-]+$/.test(name);
+      if (!isRepo && !/^[\w.-]+$/.test(name)) { err.textContent = "Usa owner/repo o solo el nombre del dueño (organización o usuario)."; return; }
       addBtn.loading = true;
       err.textContent = "";
       try {
-        const repo = await gh.getRepo(store.githubToken, name);
-        if (!this.#prefs.manual.includes(repo.full_name)) this.#prefs.manual.push(repo.full_name);
+        let entry = name;
+        if (isRepo) entry = (await gh.getRepo(store.githubToken, name)).full_name;
+        else await gh.listOwnerRepos(store.githubToken, name); // valida que el dueño existe y es accesible
+        if (!this.#prefs.manual.includes(entry)) this.#prefs.manual.push(entry);
         this.#savePrefs();
         input.value = "";
         renderItems();
-        onChange();
+        onChange(!isRepo);
       } catch (e) {
         err.textContent = (e as Error).message;
       } finally {
@@ -241,28 +245,37 @@ export class PrReview extends HTMLElement {
     input.addEventListener("keydown", (e) => { if ((e as KeyboardEvent).key === "Enter") void submit(); });
     renderItems();
     dialog.append(
-      h("div", { class: "muted", style: "margin-bottom:8px" }, "Añade aquí cualquier repositorio (owner/repo) que no salga en la lista automática. Se comprueba con tu token antes de guardarlo."),
+      h("div", { class: "muted", style: "margin-bottom:8px" }, "Si falta algún repositorio, añade aquí un repo concreto (owner/repo) o un dueño completo (por ejemplo el nombre de tu organización) para listar todos sus repos visibles con tu token."),
       h("div", { style: "display:flex;gap:8px" }, input, addBtn), err, h("div", { style: "margin-top:12px" }, items));
     return dialog;
   }
 
   async #loadRepos(select: SlSelect, detail: HTMLElement): Promise<void> {
+    const placeholder = (text: string, cls = "center"): void => {
+      if (!this.#repo) detail.replaceChildren(h("div", { class: cls }, text));
+    };
     try {
-      this.#allRepos = await gh.listRepos(store.githubToken);
+      const owners = this.#prefs.manual.filter((n) => !n.includes("/"));
+      const { repos: found, warnings } = await gh.discoverRepos(store.githubToken, owners);
+      this.#allRepos = found;
       this.#populate(select);
       const repos = this.#visibleRepos();
       let saved = "";
       try { saved = localStorage.getItem(REPO_KEY) ?? ""; } catch { /* ignorar */ }
-      if (repos.some((r) => r.full_name === saved)) {
+      if (!this.#repo && repos.some((r) => r.full_name === saved)) {
         await customElements.whenDefined("sl-select");
         await (select as unknown as { updateComplete: Promise<unknown> }).updateComplete;
         select.value = saved;
         this.#repo = saved;
         void this.#loadPulls(saved);
-      } else if (repos.length === 0) {
-        detail.replaceChildren(h("div", { class: "center" },
-          "GitHub no devolvió ningún repositorio para este token. Añade uno con «+» (owner/repo)."));
       }
+      const priv = found.filter((r) => r.private).length;
+      const lines = [`GitHub devolvió ${found.length} repositorios (${priv} privados).`];
+      if (priv === 0) {
+        lines.push("Si esperabas ver privados: el token debe ser fine-grained con «All repositories» o «Only select repositories» (no «Public repositories»); si su dueño es una organización, un owner debe aprobarlo. También puedes pulsar «+» y escribir el nombre de la organización o un owner/repo.");
+      }
+      lines.push(...warnings);
+      placeholder(lines.join("\n"), warnings.length || priv === 0 ? "center note" : "center");
     } catch (e) {
       detail.replaceChildren(h("div", { class: "err" }, (e as Error).message));
     }

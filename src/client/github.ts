@@ -69,6 +69,52 @@ export async function listRepos(t: string): Promise<GhRepo[]> {
   return all;
 }
 
+/** Repos de un dueño (organización o usuario) que el token puede ver. */
+export async function listOwnerRepos(t: string, owner: string): Promise<GhRepo[]> {
+  const fetchAll = async (base: string): Promise<GhRepo[]> => {
+    const all: GhRepo[] = [];
+    for (let page = 1; page <= 5; page++) {
+      const chunk = await gh<GhRepo[]>(t, `${base}${base.includes("?") ? "&" : "?"}per_page=100&page=${page}`);
+      all.push(...chunk);
+      if (chunk.length < 100) break;
+    }
+    return all;
+  };
+  try {
+    return await fetchAll(`/orgs/${owner}/repos?type=all`);
+  } catch {
+    return fetchAll(`/users/${owner}/repos?type=all`);
+  }
+}
+
+export interface RepoDiscovery { repos: GhRepo[]; warnings: string[] }
+
+/**
+ * Junta todo lo que se puede descubrir: /user/repos, los repos de cada organización del usuario
+ * y los dueños que el usuario añadió a mano. Los errores parciales se devuelven como avisos.
+ */
+export async function discoverRepos(t: string, extraOwners: string[]): Promise<RepoDiscovery> {
+  const map = new Map<string, GhRepo>();
+  const warnings: string[] = [];
+  const add = (list: GhRepo[]): void => list.forEach((r) => map.set(r.full_name, r));
+
+  add(await listRepos(t));
+
+  let orgs: string[] = [];
+  try {
+    orgs = (await gh<{ login: string }[]>(t, "/user/orgs?per_page=100")).map((o) => o.login);
+  } catch (e) {
+    warnings.push(`No se pudieron listar tus organizaciones: ${(e as Error).message}`);
+  }
+  const owners = [...new Set([...orgs, ...extraOwners])];
+  const results = await Promise.allSettled(owners.map((o) => listOwnerRepos(t, o)));
+  results.forEach((r, i) => {
+    if (r.status === "fulfilled") add(r.value);
+    else warnings.push(`No se pudieron listar los repos de ${owners[i]}: ${(r.reason as Error).message}`);
+  });
+  return { repos: [...map.values()], warnings };
+}
+
 export const getRepo = (t: string, fullName: string) => gh<GhRepo>(t, `/repos/${fullName}`);
 
 export const listPulls = (t: string, repo: string) =>
