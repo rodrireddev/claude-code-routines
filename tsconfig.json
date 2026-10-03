@@ -8,7 +8,13 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
-  "include": ["src/server.ts"]
+  "include": [
+    "src/server.ts",
+    "src/app.ts",
+    "src/electron/main.ts"
+  ]
 }

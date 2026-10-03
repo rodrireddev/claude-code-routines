@@ -4,39 +4,41 @@ import type { ChatMessage, Role, Variant } from "./chat-message.js";
 import type { ChatSettings } from "./chat-settings.js";
 import type { FireResponse } from "./types.js";
 
+/** Subconjunto de la API de los elementos de Shoelace que usamos. */
+interface SlTextarea extends HTMLElement { value: string }
+interface SlButton extends HTMLElement { disabled: boolean; loading: boolean }
+
 /** <routine-chat> — chat completo que dispara la routine vía /api/fire. */
 export class RoutineChat extends HTMLElement {
   #settings!: ChatSettings;
   #messages!: HTMLDivElement;
   #form!: HTMLFormElement;
-  #input!: HTMLTextAreaElement;
-  #send!: HTMLButtonElement;
+  #input!: SlTextarea;
+  #send!: SlButton;
 
   constructor() {
     super();
     this.attachShadow({ mode: "open" }).innerHTML = `
       <style>
         :host { display:flex; flex-direction:column; height:100%; }
-        header { padding:14px 16px; background:var(--panel); border-bottom:1px solid var(--bot); font-weight:600; }
-        #messages { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:10px; }
-        form { display:flex; gap:8px; padding:12px 16px; background:var(--panel); border-top:1px solid var(--bot); }
-        textarea { flex:1; resize:none; padding:10px 12px; border-radius:10px; border:1px solid var(--bot); background:var(--bg); color:var(--text); font:inherit; }
-        button { padding:0 18px; border:0; border-radius:10px; background:var(--user); color:#fff; font:inherit; font-weight:600; cursor:pointer; }
-        button:disabled { opacity:.5; cursor:default; }
+        header { padding:var(--sl-spacing-medium); background:var(--sl-color-neutral-0); border-bottom:1px solid var(--sl-color-neutral-200); font-weight:var(--sl-font-weight-semibold); font-size:var(--sl-font-size-large); }
+        #messages { flex:1; overflow-y:auto; padding:var(--sl-spacing-medium); display:flex; flex-direction:column; gap:var(--sl-spacing-small); }
+        form { display:flex; gap:var(--sl-spacing-small); align-items:flex-end; padding:var(--sl-spacing-small) var(--sl-spacing-medium); background:var(--sl-color-neutral-0); border-top:1px solid var(--sl-color-neutral-200); }
+        sl-textarea { flex:1; }
       </style>
       <header>Routine Chat</header>
       <chat-settings></chat-settings>
       <div id="messages"></div>
       <form>
-        <textarea rows="2" placeholder="Escribe el texto para la routine… (Enter envía, Shift+Enter nueva línea)" required></textarea>
-        <button type="submit">Enviar</button>
+        <sl-textarea rows="2" resize="none" placeholder="Escribe el texto para la routine… (Enter envía, Shift+Enter nueva línea)"></sl-textarea>
+        <sl-button type="button" variant="primary" size="large">Enviar</sl-button>
       </form>`;
     const root = this.shadowRoot!;
     this.#settings = root.querySelector("chat-settings") as ChatSettings;
     this.#messages = root.getElementById("messages") as HTMLDivElement;
     this.#form = root.querySelector("form")!;
-    this.#input = root.querySelector("textarea")!;
-    this.#send = root.querySelector("button")!;
+    this.#input = root.querySelector("sl-textarea") as SlTextarea;
+    this.#send = root.querySelector("sl-button") as SlButton;
   }
 
   connectedCallback(): void {
@@ -44,10 +46,11 @@ export class RoutineChat extends HTMLElement {
       e.preventDefault();
       void this.#submit();
     });
+    this.#send.addEventListener("click", () => void this.#submit());
     this.#input.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
-        this.#form.requestSubmit();
+        void this.#submit();
       }
     });
   }
@@ -68,11 +71,11 @@ export class RoutineChat extends HTMLElement {
 
   async #submit(): Promise<void> {
     const text = this.#input.value.trim();
-    if (!text) return;
+    if (!text || this.#send.loading) return;
     this.#input.value = "";
     this.#add("user", text);
     const pending = this.#add("bot", "Ejecutando routine…", "pending");
-    this.#send.disabled = true;
+    this.#send.loading = true;
     try {
       const r = await fetch("/api/fire", {
         method: "POST",
@@ -83,7 +86,7 @@ export class RoutineChat extends HTMLElement {
     } catch (err) {
       this.#render(pending, { error: `Error de red: ${(err as Error).message}` });
     } finally {
-      this.#send.disabled = false;
+      this.#send.loading = false;
       this.#input.focus();
       this.#scroll();
     }

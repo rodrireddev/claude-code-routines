@@ -4,13 +4,19 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Routine Chat</title>
+  <link rel="stylesheet" href="/vendor/shoelace/themes/light.css" />
+  <link rel="stylesheet" href="/vendor/shoelace/themes/dark.css" media="(prefers-color-scheme: dark)" />
+  <script>
+    // Shoelace usa la clase sl-theme-dark para el modo oscuro; la sincronizamos con el sistema.
+    const mq = matchMedia("(prefers-color-scheme: dark)");
+    const apply = () => document.documentElement.classList.toggle("sl-theme-dark", mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+  </script>
+  <script type="module" data-shoelace="/vendor/shoelace" src="/vendor/shoelace/shoelace.js"></script>
   <style>
-    :root { --bg:#f6f6f4; --panel:#fff; --text:#1c1c1a; --muted:#77756e; --user:#c96442; --bot:#ececE8; --err:#b3261e; }
-    @media (prefers-color-scheme: dark) {
-      :root { --bg:#1a1a18; --panel:#242421; --text:#eeeeea; --muted:#9a988f; --bot:#32312d; }
-    }
-    body { margin:0; height:100dvh; background:var(--bg); color:var(--text); font:15px/1.5 system-ui,sans-serif; }
-    * { box-sizing: border-box; }
+    html, body { height:100%; margin:0; }
+    body { background:var(--sl-color-neutral-50); color:var(--sl-color-neutral-900); font-family:var(--sl-font-sans); font-size:var(--sl-font-size-medium); }
     routine-chat { height:100%; }
   </style>
 </head>

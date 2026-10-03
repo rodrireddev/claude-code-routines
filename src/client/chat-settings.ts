@@ -1,3 +1,7 @@
+/** Subconjunto de la API de los elementos de Shoelace que usamos. */
+interface SlInputLike extends HTMLElement { value: string }
+interface SlDetailsLike extends HTMLElement { open: boolean }
+
 const KEYS = { triggerId: "triggerId", token: "token" } as const;
 
 function load(key: string): string {
@@ -9,33 +13,30 @@ function save(key: string, value: string): void {
 
 /** <chat-settings> — campos de Trigger ID y Token, persistidos en localStorage. */
 export class ChatSettings extends HTMLElement {
-  #triggerId!: HTMLInputElement;
-  #token!: HTMLInputElement;
-  #details!: HTMLDetailsElement;
+  #triggerId!: SlInputLike;
+  #token!: SlInputLike;
+  #details!: SlDetailsLike;
 
   constructor() {
     super();
     this.attachShadow({ mode: "open" }).innerHTML = `
       <style>
-        details { background:var(--panel); border-bottom:1px solid var(--bot); padding:8px 16px; }
-        summary { cursor:pointer; color:var(--muted); }
-        .fields { display:grid; gap:8px; padding-top:8px; }
-        label { display:grid; gap:2px; font-size:13px; color:var(--muted); }
-        input { padding:8px 10px; border-radius:8px; border:1px solid var(--bot); background:var(--bg); color:var(--text); font:inherit; }
-        small { color:var(--muted); }
+        sl-details { --sl-panel-background-color:var(--sl-color-neutral-0); }
+        sl-details::part(base) { border-radius:0; border-width:0 0 1px 0; }
+        .fields { display:grid; gap:var(--sl-spacing-small); }
+        small { color:var(--sl-color-neutral-500); }
       </style>
-      <details>
-        <summary>⚙ Configuración</summary>
+      <sl-details summary="⚙ Configuración">
         <div class="fields">
-          <label>Trigger ID <input id="triggerId" placeholder="trig_..." autocomplete="off" /></label>
-          <label>Token <input id="token" type="password" placeholder="sk-ant-oat01-..." autocomplete="off" /></label>
-          <small>Se guarda solo en este navegador (localStorage).</small>
+          <sl-input id="triggerId" label="Trigger ID" placeholder="trig_..." autocomplete="off" clearable></sl-input>
+          <sl-input id="token" label="Token" type="password" placeholder="sk-ant-oat01-..." autocomplete="off" password-toggle></sl-input>
+          <small>Se guarda solo en este equipo (localStorage).</small>
         </div>
-      </details>`;
+      </sl-details>`;
     const root = this.shadowRoot!;
-    this.#triggerId = root.getElementById("triggerId") as HTMLInputElement;
-    this.#token = root.getElementById("token") as HTMLInputElement;
-    this.#details = root.querySelector("details")!;
+    this.#triggerId = root.getElementById("triggerId") as SlInputLike;
+    this.#token = root.getElementById("token") as SlInputLike;
+    this.#details = root.querySelector("sl-details")!;
   }
 
   connectedCallback(): void {

@@ -11,15 +11,18 @@ export class ChatMessage extends HTMLElement {
       <style>
         :host { display:flex; }
         :host([role="user"]) { justify-content:flex-end; }
-        .bubble { max-width:min(680px,85%); padding:10px 14px; border-radius:14px; white-space:pre-wrap; word-break:break-word; background:var(--bot); }
-        :host([role="user"]) .bubble { background:var(--user); color:#fff; border-bottom-right-radius:4px; }
-        :host([role="bot"]) .bubble { border-bottom-left-radius:4px; }
-        :host([variant="pending"]) .bubble { color:var(--muted); font-style:italic; }
-        :host([variant="error"]) .bubble { color:var(--err); }
-        ::slotted(a) { color:inherit; }
-        ::slotted(small) { display:block; margin-top:4px; font-size:12px; color:var(--muted); }
+        .bubble { max-width:min(680px,85%); padding:var(--sl-spacing-small) var(--sl-spacing-medium); border-radius:var(--sl-border-radius-large); white-space:pre-wrap; word-break:break-word; background:var(--sl-color-neutral-0); border:1px solid var(--sl-color-neutral-200); box-shadow:var(--sl-shadow-x-small); display:flex; align-items:center; gap:var(--sl-spacing-small); }
+        .content { min-width:0; }
+        sl-spinner { display:none; flex:none; }
+        :host([role="user"]) .bubble { background:var(--sl-color-primary-600); border-color:var(--sl-color-primary-600); color:var(--sl-color-neutral-0); border-bottom-right-radius:var(--sl-border-radius-small); }
+        :host([role="bot"]) .bubble { border-bottom-left-radius:var(--sl-border-radius-small); }
+        :host([variant="pending"]) .bubble { color:var(--sl-color-neutral-600); }
+        :host([variant="pending"]) sl-spinner { display:block; }
+        :host([variant="error"]) .bubble { background:var(--sl-color-danger-50); border-color:var(--sl-color-danger-300); color:var(--sl-color-danger-800); }
+        ::slotted(a) { color:var(--sl-color-primary-600); }
+        ::slotted(small) { display:block; margin-top:var(--sl-spacing-3x-small); font-size:var(--sl-font-size-x-small); color:var(--sl-color-neutral-500); }
       </style>
-      <div class="bubble"><slot></slot></div>`;
+      <div class="bubble"><sl-spinner></sl-spinner><div class="content"><slot></slot></div></div>`;
   }
 
   connectedCallback(): void {
