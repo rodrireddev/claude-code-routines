@@ -129,6 +129,7 @@ export class PrReview extends HTMLElement {
         h("li", {}, "Pull requests: Read and write (para revisar y aprobar)"),
         h("li", {}, "Contents: Read-only (para ver los diffs)"),
         h("li", {}, "Metadata: Read-only (se añade solo)")),
+      h("div", { class: "muted" }, "Alternativa: un token classic (Settings → Developer settings → Tokens (classic)) con el permiso «repo». Ve todos tus repos privados sin configurar repos uno a uno, pero da acceso amplio: ponle caducidad corta."),
       input, err, btn,
       h("div", { class: "muted" }, "El token se guarda como el resto de tus datos locales (cifrado si activaste el cifrado) y solo se envía a api.github.com."));
     this.#view.replaceChildren(box);
