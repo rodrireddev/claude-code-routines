@@ -18,6 +18,22 @@ const form = document.getElementById("form") as HTMLFormElement;
 const input = document.getElementById("input") as HTMLTextAreaElement;
 const send = document.getElementById("send") as HTMLButtonElement;
 
+const triggerIdInput = document.getElementById("triggerId") as HTMLInputElement;
+const tokenInput = document.getElementById("token") as HTMLInputElement;
+const settings = document.getElementById("settings") as HTMLDetailsElement;
+
+function load(key: string): string {
+  try { return localStorage.getItem(key) ?? ""; } catch { return ""; }
+}
+function save(key: string, value: string): void {
+  try { localStorage.setItem(key, value); } catch { /* sin almacenamiento */ }
+}
+triggerIdInput.value = load("triggerId");
+tokenInput.value = load("token");
+triggerIdInput.addEventListener("input", () => save("triggerId", triggerIdInput.value));
+tokenInput.addEventListener("input", () => save("token", tokenInput.value));
+if (!triggerIdInput.value || !tokenInput.value) settings.open = true;
+
 function addMessage(role: "user" | "bot", text: string, cls = ""): HTMLDivElement {
   const el = document.createElement("div");
   el.className = `msg ${role} ${cls}`.trim();
@@ -68,7 +84,7 @@ form.addEventListener("submit", async (e) => {
     const r = await fetch("/api/fire", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text, triggerId: triggerIdInput.value, token: tokenInput.value }),
     });
     renderResult(pending, (await r.json()) as FireResponse);
   } catch (err) {

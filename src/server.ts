@@ -31,15 +31,14 @@ async function readBody(req: IncomingMessage): Promise<string> {
 }
 
 async function fireRoutine(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  if (!TRIGGER_ID || !TOKEN) {
-    return sendJson(res, 500, {
-      error: "Faltan ROUTINE_TRIGGER_ID y/o ROUTINE_TOKEN en el servidor (ver .env.example).",
-    });
-  }
-
   let text: unknown;
+  let triggerId: string | undefined = TRIGGER_ID;
+  let token: string | undefined = TOKEN;
   try {
-    ({ text } = JSON.parse(await readBody(req)));
+    const body = JSON.parse(await readBody(req));
+    text = body.text;
+    if (typeof body.triggerId === "string" && body.triggerId.trim()) triggerId = body.triggerId.trim();
+    if (typeof body.token === "string" && body.token.trim()) token = body.token.trim();
   } catch {
     return sendJson(res, 400, { error: "JSON inválido" });
   }
@@ -47,13 +46,17 @@ async function fireRoutine(req: IncomingMessage, res: ServerResponse): Promise<v
     return sendJson(res, 400, { error: "El campo 'text' es obligatorio" });
   }
 
+  if (!triggerId || !token) {
+    return sendJson(res, 400, { error: "Configura el Trigger ID y el Token (⚙ Configuración)." });
+  }
+
   try {
     const upstream = await fetch(
-      `https://api.anthropic.com/v1/claude_code/routines/${encodeURIComponent(TRIGGER_ID)}/fire`,
+      `https://api.anthropic.com/v1/claude_code/routines/${encodeURIComponent(triggerId)}/fire`,
       {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${TOKEN}`,
+          Authorization: `Bearer ${token}`,
           "anthropic-beta": "experimental-cc-routine-2026-04-01",
           "anthropic-version": "2023-06-01",
           "Content-Type": "application/json",
@@ -96,5 +99,4 @@ createServer((req, res) => {
   res.writeHead(405).end();
 }).listen(PORT, () => {
   console.log(`Routine chat en http://localhost:${PORT}`);
-  if (!TRIGGER_ID || !TOKEN) console.warn("⚠ ROUTINE_TRIGGER_ID / ROUTINE_TOKEN no configurados");
 });
