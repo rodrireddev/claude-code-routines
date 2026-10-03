@@ -162,21 +162,26 @@ export async function probe(t: string, path: string): Promise<Probe> {
 }
 
 /**
- * Prueba (sin efectos) si el token tiene permiso de escritura en Pull requests del repo.
+ * Prueba (sin efectos) el permiso de escritura en Pull requests del repo. Devuelve el estado HTTP.
  * Envía una review con un `event` inválido: GitHub comprueba el permiso antes de validar, así que
  * un token sin acceso concedido recibe 401/403 y uno con acceso recibe 404/422. Nunca crea nada.
  */
-export async function probeReviewAccess(t: string, repo: string): Promise<boolean | null> {
+export async function probeReviewStatus(t: string, repo: string): Promise<number> {
   try {
     const res = await fetch(`${API}/repos/${repo}/pulls/1/reviews`, {
       method: "POST",
       headers: { Authorization: `Bearer ${t}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json" },
       body: JSON.stringify({ event: "__PROBE__" }),
     });
-    if (res.status === 401 || res.status === 403) return false;
-    if (res.status === 404 || res.status === 422) return true;
-    return null; // respuesta inesperada: no concluyente
+    return res.status;
   } catch {
-    return null;
+    return 0;
   }
 }
+
+/** true = el token tiene permiso, false = no lo tiene, null = no concluyente. */
+export const accessFromStatus = (status: number): boolean | null =>
+  status === 401 || status === 403 ? false : status === 404 || status === 422 ? true : null;
+
+export const probeReviewAccess = async (t: string, repo: string): Promise<boolean | null> =>
+  accessFromStatus(await probeReviewStatus(t, repo));

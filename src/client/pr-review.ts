@@ -3,7 +3,7 @@ import * as gh from "./github.js";
 import type { GhFile, GhPull, GhRepo, GhReview, ReviewEvent } from "./github.js";
 import type { SlButton, SlInput, SlTextarea } from "./types.js";
 
-interface SlSelect extends HTMLElement { value: string | string[]; disabled: boolean }
+interface SlSelect extends HTMLElement { value: string | string[]; disabled: boolean; placeholder: string }
 
 const REPO_KEY = "routine-chat.repo.v1";
 const PREFS_KEY = "routine-chat.repos.v1";
@@ -139,6 +139,8 @@ export class PrReview extends HTMLElement {
 
   #prefs = readPrefs();
   #allRepos: GhRepo[] = [];
+  /** Resultado de la detección de acceso por repo (modo automático). */
+  #access = new Map<string, boolean | null>();
 
   #savePrefs(): void {
     try { localStorage.setItem(PREFS_KEY, JSON.stringify(this.#prefs)); } catch { /* ignorar */ }
@@ -185,11 +187,23 @@ export class PrReview extends HTMLElement {
   #visibleRepos(): GhRepo[] {
     const map = new Map<string, GhRepo>();
     const enabled = this.#prefs.enabled ? new Set(this.#prefs.enabled) : null;
-    for (const r of this.#allRepos) if (!enabled || enabled.has(r.full_name)) map.set(r.full_name, r);
+    // Modo automático: solo los repos donde la detección confirmó (o no pudo descartar) acceso del token.
+    const detected = this.#access.size > 0 && [...this.#access.values()].some((v) => v !== false);
+    for (const r of this.#allRepos) {
+      const keep = enabled ? enabled.has(r.full_name) : !detected || this.#access.get(r.full_name) !== false;
+      if (keep) map.set(r.full_name, r);
+    }
     for (const name of this.#prefs.manual.filter((n) => n.includes("/"))) {
       if (!map.has(name)) map.set(name, this.#allRepos.find((r) => r.full_name === name) ?? { full_name: name, private: false });
     }
     return [...map.values()].sort((a, b) => Number(b.private) - Number(a.private) || a.full_name.localeCompare(b.full_name));
+  }
+
+  /** Vuelve a descubrir y detectar (tras cambiar a modo automático). */
+  async #reloadAll(): Promise<void> {
+    const select = this.#root.querySelector("sl-select") as unknown as SlSelect;
+    const detail = this.#detailEl;
+    await this.#loadRepos(select, detail);
   }
 
   #populate(select: SlSelect): void {
@@ -221,6 +235,13 @@ export class PrReview extends HTMLElement {
     const allBtn = h("sl-button", { size: "small" }, "Todos");
     const noneBtn = h("sl-button", { size: "small" }, "Ninguno");
     const detect = h("sl-button", { size: "small" }, "Detectar los del token (experimental)") as HTMLElement & SlButton;
+    const autoBtn = h("sl-button", { size: "small", variant: "primary" }, "Automático");
+    autoBtn.addEventListener("click", () => {
+      this.#prefs.enabled = null;
+      this.#savePrefs();
+      (dialog as unknown as { hide(): void }).hide();
+      void this.#reloadAll();
+    });
     allBtn.addEventListener("click", () => setAll(true));
     noneBtn.addEventListener("click", () => setAll(false));
     detect.addEventListener("click", async () => {
@@ -236,14 +257,14 @@ export class PrReview extends HTMLElement {
     const save = h("sl-button", { slot: "footer", variant: "primary" }, "Guardar");
     save.addEventListener("click", () => {
       const sel = boxes.filter((b) => b.checked).map((b) => b.dataset.repo!);
-      this.#prefs.enabled = sel.length === all.length ? null : sel;
+      this.#prefs.enabled = sel;
       this.#savePrefs();
       onChange();
       (dialog as unknown as { hide(): void }).hide();
     });
     dialog.append(
-      h("div", { class: "muted", style: "margin-bottom:8px" }, "GitHub no indica qué repos concediste a un fine-grained token (siempre puede leer los públicos). Marca los que quieras ver en la lista."),
-      h("div", { style: "display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px" }, allBtn, noneBtn, detect),
+      h("div", { class: "muted", style: "margin-bottom:8px" }, "Por defecto la app detecta sola en qué repos tiene permiso tu token («Automático»). Si prefieres fijar la lista a mano, marca repos y pulsa Guardar."),
+      h("div", { style: "display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px" }, autoBtn, allBtn, noneBtn, detect),
       status,
       h("div", { style: "display:grid;gap:6px;margin-top:8px;max-height:40vh;overflow:auto" }, ...boxes),
       save);
@@ -276,6 +297,10 @@ export class PrReview extends HTMLElement {
         else out.push(`  respuesta: ${JSON.stringify(r.body)}`);
         out.push("");
       }
+      out.push("Prueba de permiso de Pull requests por repo (403 = sin permiso concedido; 404/422 = con permiso):");
+      const repos = this.#allRepos.slice(0, 60).map((r) => r.full_name);
+      const statuses = await Promise.all(repos.map((r) => gh.probeReviewStatus(t, r)));
+      repos.forEach((r, i) => out.push(`  ${statuses[i]}  ${r}`));
       pre.textContent = out.join("\n");
     };
     const again = h("sl-button", { slot: "footer", variant: "primary" }, "Volver a ejecutar");
@@ -334,6 +359,18 @@ export class PrReview extends HTMLElement {
     return dialog;
   }
 
+  /** Comprueba, con poca concurrencia, en qué repos tiene permiso de Pull requests el token. */
+  async #detectAccess(repos: GhRepo[]): Promise<void> {
+    this.#access.clear();
+    const queue = repos.slice(0, 150).map((r) => r.full_name);
+    const worker = async (): Promise<void> => {
+      for (let name = queue.shift(); name; name = queue.shift()) {
+        this.#access.set(name, await gh.probeReviewAccess(store.githubToken, name));
+      }
+    };
+    await Promise.all(Array.from({ length: 8 }, worker));
+  }
+
   async #loadRepos(select: SlSelect, detail: HTMLElement): Promise<void> {
     const placeholder = (text: string, cls = "center"): void => {
       if (!this.#repo) detail.replaceChildren(h("div", { class: cls }, text));
@@ -342,6 +379,14 @@ export class PrReview extends HTMLElement {
       const owners = this.#prefs.manual.filter((n) => !n.includes("/"));
       const { repos: found, warnings } = await gh.discoverRepos(store.githubToken, owners);
       this.#allRepos = found;
+      if (!this.#prefs.enabled) {
+        select.disabled = true;
+        select.placeholder = "Detectando repositorios del token…";
+        placeholder(`GitHub devolvió ${found.length} repositorios. Detectando en cuáles tiene permiso tu token…`);
+        await this.#detectAccess(found);
+        select.disabled = false;
+        select.placeholder = "Elige un repositorio";
+      }
       this.#populate(select);
       const repos = this.#visibleRepos();
       let saved = "";
@@ -353,10 +398,13 @@ export class PrReview extends HTMLElement {
         this.#repo = saved;
         void this.#loadPulls(saved);
       }
-      const priv = found.filter((r) => r.private).length;
-      const lines = [`GitHub devolvió ${found.length} repositorios (${priv} privados).`];
+      const shown = this.#visibleRepos().length;
+      const lines = [`GitHub devolvió ${found.length} repositorios.`];
       if (!this.#prefs.enabled) {
-        lines.push("GitHub no indica cuáles concediste al token (siempre puede leer los públicos). Pulsa «Elegir repos» para marcar los que quieres ver; ahí hay un detector experimental.");
+        const confirmed = [...this.#access.values()].filter((v) => v === true).length;
+        lines.push(this.#access.size && [...this.#access.values()].some((v) => v !== false)
+          ? `Detección automática: ${shown} con permiso de Pull requests del token (${confirmed} confirmados).`
+          : "La detección no pudo confirmar acceso en ninguno, así que se muestran todos. Revisa «Diagnóstico».");
       }
       lines.push(...warnings);
       placeholder(lines.join("\n"), "center note");
