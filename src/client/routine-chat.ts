@@ -25,6 +25,7 @@ export class RoutineChat extends HTMLElement {
         main { flex:1; min-width:0; display:flex; flex-direction:column; position:relative; }
         header { display:flex; align-items:center; justify-content:space-between; gap:var(--sl-spacing-small); padding:var(--sl-spacing-x-small) var(--sl-spacing-medium); min-height:52px; }
         #title { font-weight:var(--sl-font-weight-semibold); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .actions { display:flex; }
         sl-icon-button { font-size:var(--sl-font-size-large); color:var(--sl-color-neutral-600); }
         #scroll { flex:1; overflow-y:auto; }
         #messages { max-width:768px; margin:0 auto; padding:var(--sl-spacing-medium); display:flex; flex-direction:column; gap:var(--sl-spacing-large); }
@@ -47,7 +48,10 @@ export class RoutineChat extends HTMLElement {
       <main>
         <header>
           <div id="title"></div>
-          <sl-icon-button name="gear" label="Configuración"></sl-icon-button>
+          <div class="actions">
+            <sl-icon-button id="lock" name="lock" label="Bloquear" hidden></sl-icon-button>
+            <sl-icon-button id="gear" name="gear" label="Configuración"></sl-icon-button>
+          </div>
         </header>
         <div id="scroll">
           <div class="empty"><div class="logo">✦</div><h2>¿Qué routine quieres ejecutar?</h2><div>Escribe un mensaje y se enviará como texto a tu routine.</div></div>
@@ -72,7 +76,13 @@ export class RoutineChat extends HTMLElement {
   }
 
   connectedCallback(): void {
-    this.shadowRoot!.querySelector("header sl-icon-button")!.addEventListener("click", () => this.#settings.show());
+    const root = this.shadowRoot!;
+    const lock = root.getElementById("lock")!;
+    root.getElementById("gear")!.addEventListener("click", () => this.#settings.show());
+    lock.addEventListener("click", () => void store.lock());
+    const syncLock = (): void => void (lock.hidden = !store.encrypted);
+    store.addEventListener("security", syncLock);
+    syncLock();
     this.#send.addEventListener("click", () => void this.#submit());
     this.#input.addEventListener("keydown", (e) => {
       if ((e as KeyboardEvent).key === "Enter" && !(e as KeyboardEvent).shiftKey) {
