@@ -16,7 +16,7 @@ RUN apt-get update \
 WORKDIR /app
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
-    PORT=3000 \
+    PORT=47321 \
     DATA_DIR=/data \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 COPY --from=build /app/package.json ./
@@ -27,5 +27,5 @@ COPY --from=build /app/public ./public
 RUN mkdir -p /data && chown node:node /data
 USER node
 VOLUME ["/data"]
-EXPOSE 3000
+EXPOSE 47321
 CMD ["node", "dist/server/main.js"]

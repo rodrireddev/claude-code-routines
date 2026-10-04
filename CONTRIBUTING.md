@@ -8,7 +8,7 @@ Thanks for your interest in improving Routine Chat! Bug reports, ideas and pull 
 git clone https://github.com/rodrireddev/github-routine-api.git
 cd github-routine-api
 npm install
-npm start            # http://localhost:3000 (rebuilds on every start)
+npm start            # http://localhost:47321 (rebuilds on every start)
 npm run electron     # desktop app
 ```
 

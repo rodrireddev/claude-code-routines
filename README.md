@@ -70,7 +70,7 @@ git clone https://github.com/rodrireddev/github-routine-api.git
 cd github-routine-api
 npm install
 
-npm start          # web: http://localhost:3000
+npm start          # web: http://localhost:47321
 npm run electron   # desktop window (Electron / Chromium)
 ```
 
@@ -180,7 +180,7 @@ You can change everything from the UI. The server reads optional settings from a
 | Variable | Description | Default |
 |---|---|---|
 | `HOST` | Interface to listen on. Any non-loopback value (e.g. `0.0.0.0`) switches to **server mode**. | `127.0.0.1` |
-| `PORT` | HTTP port. Keep it fixed: browser storage is per origin. | `3000` |
+| `PORT` | HTTP port. Keep it fixed: browser storage is per origin. | `47321` |
 | `ADMIN_PASSWORD` | Enables the login screen (min. 12 characters). **Required in server mode.** | – |
 | `APP_SECRET` | Encrypts server-side data and protects sessions (min. 32 characters). **Required in server mode**; generated automatically in local mode. | auto |
 | `DATA_DIR` | Where the encrypted bot settings and the WhatsApp session are stored. | `./data` |
@@ -205,7 +205,7 @@ Or with Docker (Chromium included):
 
 ```bash
 docker build -t routine-chat .
-docker run -d --name routine-chat -p 127.0.0.1:3000:3000 \
+docker run -d --name routine-chat -p 127.0.0.1:47321:47321 \
   -e ADMIN_PASSWORD='a long passphrase' -e APP_SECRET="$(openssl rand -hex 32)" -e TRUST_PROXY=true \
   -v routine-chat-data:/data routine-chat
 ```

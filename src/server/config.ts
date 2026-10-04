@@ -42,7 +42,7 @@ function bool(value: string | undefined, fallback: boolean): boolean {
  */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const host = env.HOST?.trim() || "127.0.0.1";
-  const port = Number(env.PORT ?? 3000);
+  const port = Number(env.PORT ?? 47321);
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new ConfigError(`Invalid PORT: ${env.PORT}`);
 
   const dataDir = env.DATA_DIR
