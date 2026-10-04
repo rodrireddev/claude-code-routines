@@ -1,42 +1,195 @@
-<p align="center"><img src="public/assets/logo-128.png" width="96" alt="Routine Chat" /></p>
+<div align="center">
+
+<img src="public/assets/logo-512.png" width="140" alt="Routine Chat logo" />
 
 # Routine Chat
 
-Mini web app en TypeScript que dispara una Claude Code Routine (`POST /v1/claude_code/routines/<id>/fire`) desde una interfaz tipo chat. El token vive solo en el servidor local (no se envía a terceros).
+**A local, chat-style desktop & web client for firing Claude Code Routines and reviewing the GitHub pull requests they produce.**
 
-- **Cliente:** Web Components (`<routine-chat>`, `<chat-message>`, `<chat-settings>`) en `src/client`, con estilos de [Shoelace](https://shoelace.style) (modo claro/oscuro: sistema, claro u oscuro con el botón de la barra lateral). Shoelace se sirve en local desde `node_modules`, sin CDN.
-- **Servidor:** Node + TypeScript (`src/app.ts`) que hace de proxy hacia la API y sirve el cliente.
-- **Escritorio:** Electron (`src/electron/main.ts`) levanta el servidor y abre la app en una ventana Chromium.
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Electron](https://img.shields.io/badge/Electron-desktop-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
+[![Web Components](https://img.shields.io/badge/UI-Web%20Components-29ABE2)](https://developer.mozilla.org/docs/Web/API/Web_components)
+[![Shoelace](https://img.shields.io/badge/styled%20with-Shoelace-F97316)](https://shoelace.style)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-## Uso
+<img src="docs/screenshots/chat-light.png" alt="Routine Chat – conversations view" width="860" />
+
+</div>
+
+---
+
+## Why?
+
+[Claude Code Routines](https://code.claude.com/docs/en/claude-code-on-the-web) can be triggered over HTTP, but doing it by hand means juggling `curl`, trigger IDs, tokens and session links. **Routine Chat** turns that into a familiar chat UI:
+
+- Each **conversation** is bound to one routine (its own trigger ID + token).
+- Every message you send **fires the routine** with your text and shows a link to the Claude Code session it started.
+- When the routine opens a pull request, you can **review, comment on and approve it** from the same app.
+
+Everything runs **on your machine**. Your tokens never touch a third-party server.
+
+## Features
+
+| | |
+|---|---|
+| 💬 **Chat-style UI** | ChatGPT/Claude-like layout: conversation list on the left, chat on the right. |
+| 🗂️ **Multiple routines** | Every conversation has its own trigger ID, token and history. |
+| 💾 **Local history** | Conversations are persisted locally (browser / Electron storage). |
+| 🔐 **Optional encryption** | Lock your data with a passphrase: PBKDF2-SHA256 + AES-256-GCM via WebCrypto. |
+| 🔍 **Pull request review** | See all your open PRs, read descriptions and diffs, then **Approve**, **Request changes** or **Comment**. |
+| 🌗 **Light / dark / system theme** | One-click theme toggle, remembered between sessions. |
+| 🖥️ **Desktop app** | Ships as an Electron app, or runs in any browser on `localhost`. |
+| 🧩 **Zero-framework frontend** | Native Web Components written in TypeScript, styled with [Shoelace](https://shoelace.style). |
+
+## Screenshots
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/pull-requests.png" alt="Pull request review" /><br/><sub><b>Review & approve pull requests</b></sub></td>
+    <td align="center"><img src="docs/screenshots/chat-dark.png" alt="Dark theme" /><br/><sub><b>Dark theme</b></sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/settings.png" alt="Per-conversation settings" /><br/><sub><b>Per-conversation trigger & token</b></sub></td>
+    <td align="center"><img src="docs/screenshots/lock-screen.png" alt="Encrypted lock screen" /><br/><sub><b>Encrypted local data</b></sub></td>
+  </tr>
+</table>
+
+## Quick start
+
+**Requirements:** Node.js 22.9+ and npm.
 
 ```bash
+git clone https://github.com/rodrireddev/github-routine-api.git
+cd github-routine-api
 npm install
-npm run dev        # navegador: http://localhost:3000
-npm run electron   # ventana de escritorio (Electron/Chromium)
+
+npm start          # web: http://localhost:3000
+npm run electron   # desktop window (Electron / Chromium)
 ```
 
-La interfaz es similar a ChatGPT/Claude: lista de conversaciones a la izquierda y chat a la derecha. Cada conversación tiene su propio Trigger ID y Token (icono ⚙ → Configuración) y su historial, todo guardado en local (`localStorage`). Si una conversación no tiene Trigger ID/Token se usan `ROUTINE_TRIGGER_ID` y `ROUTINE_TOKEN` del `.env` (ver `.env.example`). `PORT` cambia el puerto (por defecto 3000; mantenlo fijo para conservar la configuración guardada).
+Both commands rebuild the TypeScript sources before starting.
 
-Cada mensaje se envía como `{"text": "..."}`. La respuesta de la API (id y enlace de la sesión creada) se muestra como mensaje del bot.
+Then:
 
-## Revisar y aprobar Pull Requests (GitHub)
+1. Click **⚙** (top right) and enter a **name**, the routine **Trigger ID** (`trig_…`) and its **token**.
+2. Type a message and press **Enter**. The routine fires and you get a link to the Claude Code session it started.
+3. Click **New conversation** to add another routine, each with its own credentials.
 
-Botón **Pull requests** al pie de la barra lateral. La primera vez pide un **fine-grained personal access token** de GitHub (Settings → Developer settings → Personal access tokens → Fine-grained tokens), limitado a los repos que quieras revisar, con permisos:
+## How it works
 
-- Pull requests: **Read and write**
-- Contents: **Read-only**
-- Metadata: Read-only (automático)
+```mermaid
+flowchart LR
+    UI["Browser / Electron<br/>Web Components UI"] -- "POST /api/fire<br/>{ text, triggerId, token }" --> S["Local Node server<br/>127.0.0.1"]
+    S -- "POST /v1/claude_code/routines/{id}/fire" --> A["Anthropic API"]
+    UI -- "REST (your GitHub token)" --> G["api.github.com"]
+```
 
-Después eliges un repositorio. GitHub **no ofrece** ninguna llamada que liste los repos concedidos a un fine-grained token (siempre puede leer los públicos), así que la lista se filtra con esa detección (por defecto la app detecta sola en qué repos tiene permiso el token probando el permiso de Pull requests de cada uno sin crear nada; «Elegir repos» permite fijar la lista a mano). Puedes pegar la URL de un PR (o `owner/repo#N`) para abrirlo directamente, sin depender de la lista: si el token tiene acceso se abre y el repo queda guardado, y si no, GitHub responde 404/403 y la app lo explica. El botón «+» añade a mano un `owner/repo` o un dueño completo, y **Diagnóstico** muestra las respuestas crudas de GitHub. Al entrar se abre **★ Todos mis PRs abiertos**: los PRs abiertos de todos los repos que ve el token (tus repos, tus organizaciones, donde participas o te piden review), sin tener que elegir repo. Después ves los PRs abiertos, su descripción, reviews existentes y diffs, y puedes **Aprobar**, **Solicitar cambios** o **Comentar** (la review se fija al commit que estabas viendo y pide confirmación). El token solo se envía a `api.github.com` y se guarda con el resto de tus datos locales (cifrado si activaste el cifrado). GitHub no permite aprobar tus propios PRs.
+- **Routines:** the UI sends each message to a tiny local server (bound to `127.0.0.1`). The server forwards it to the Anthropic API using the conversation's trigger ID and token. The request is made server-side so that browser CORS rules don't get in the way.
+- **GitHub:** pull request calls go **directly** from the UI to `api.github.com`. They never pass through the local server.
 
-> **Token classic como alternativa.** Si un fine-grained token da 404 en un repo privado que supuestamente concediste (GitHub responde 404, no 403, cuando el token no tiene acceso), puedes usar un token *classic* con el permiso `repo`: ve todos los repos privados a los que tu usuario tiene acceso y los lista solos. La app lo acepta tal cual; la contrapartida es un acceso mucho más amplio, así que usa caducidad corta y revócalo si no lo necesitas.
+The request sent for every message is equivalent to:
 
-## Cifrado de datos locales
+```bash
+curl -X POST https://api.anthropic.com/v1/claude_code/routines/$TRIGGER_ID/fire \
+  -H "Authorization: Bearer $ROUTINE_TOKEN" \
+  -H "anthropic-beta: experimental-cc-routine-2026-04-01" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "Content-Type: application/json" \
+  -d '{"text": "your message"}'
+```
 
-Por defecto el historial y los tokens se guardan en claro en `localStorage`. Desde ⚙ → **Seguridad** puedes activar el cifrado con una contraseña:
+> **Note:** the fire endpoint returns the ID and URL of the Claude Code session it created, not the routine's final output. Routine Chat shows that link so you can follow the session.
 
-- Contraseña → clave con PBKDF2-SHA256 (600 000 iteraciones, sal aleatoria) y datos cifrados con AES-256-GCM (WebCrypto). En disco solo queda el "vault" cifrado; los datos en claro se borran.
-- Al abrir la app se pide la contraseña (pantalla de bloqueo). El botón 🔒 de la cabecera bloquea al instante.
-- Si olvidas la contraseña no hay recuperación: solo "borrar todo".
-- El cifrado protege los datos **en reposo**. Mientras la app está desbloqueada el token está en memoria y se envía a tu servidor local (`127.0.0.1`) para llamar a la API.
+## Reviewing pull requests
+
+Open **Pull requests** at the bottom of the sidebar and paste a GitHub token. The view opens on **★ All my open PRs**. It lists the open PRs from your repos, your organizations, and PRs that involve you or request your review. You can also:
+
+- pick a single repository from the dropdown;
+- paste a PR URL (or `owner/repo#123`) to open it directly;
+- use **Diagnostics** to see GitHub's raw responses for your token.
+
+Reviews are pinned to the commit you were looking at and ask for confirmation before being sent.
+
+### Which token should I use?
+
+| Token type | Setup | Pros | Cons |
+|---|---|---|---|
+| **Fine-grained PAT** *(recommended)* | Resource owner = you (or your org). Repository access = the repos to review. Permissions: **Pull requests: Read and write**, **Contents: Read-only**. | Least privilege: limited to the repos and permissions you choose. | GitHub has no API to list "the repos this token can access". Private repos the token wasn't granted return **404**. |
+| **Classic PAT** | Scope **`repo`**. Use a short expiration. | Sees every private repo your user can access. Works out of the box. | Broad access to all your repositories. |
+
+> GitHub does not allow approving (or requesting changes on) **your own** pull requests. Routine Chat disables those buttons on PRs authored by the token's user.
+
+## Security & privacy
+
+- **Local only.** The server listens on `127.0.0.1` and only forwards routine calls to `api.anthropic.com`. GitHub calls go straight to `api.github.com`.
+- **Plain storage by default.** Conversations, trigger IDs and tokens are stored in your local browser/Electron storage.
+- **Optional encryption.** In **⚙ → Security**, set a passphrase:
+  - A key is derived with **PBKDF2-SHA256** (600,000 iterations, random salt).
+  - Data is encrypted with **AES-256-GCM** (WebCrypto).
+  - Only the encrypted vault remains on disk, and the app asks for the passphrase at startup.
+  - **🔒** locks the app instantly.
+  - There is **no recovery** if you forget the passphrase.
+- Encryption protects data **at rest**. While unlocked, tokens live in memory so the app can use them.
+- Untrusted content from GitHub (titles, descriptions, diffs) is always rendered as text, never as HTML.
+
+See [SECURITY.md](SECURITY.md) to report a vulnerability.
+
+## Configuration
+
+All settings can be made from the UI. Optional defaults can live in a `.env` file (copy [`.env.example`](.env.example)):
+
+| Variable | Description | Default |
+|---|---|---|
+| `ROUTINE_TRIGGER_ID` | Fallback trigger ID, used when a conversation has none | – |
+| `ROUTINE_TOKEN` | Fallback routine token | – |
+| `PORT` | Local server port. Keep it fixed: browser storage is per origin, so changing it starts with empty storage. | `3000` |
+
+## Project structure
+
+```
+src/
+├── app.ts                  # Local HTTP server: static files + /api/fire proxy
+├── server.ts               # CLI entry point (npm start)
+├── electron/main.ts        # Electron entry point (npm run electron)
+└── client/                 # Frontend (Web Components, compiled to /public)
+    ├── routine-chat.ts     # <routine-chat>: app shell, chat view
+    ├── conversation-list.ts# <conversation-list>: sidebar
+    ├── chat-message.ts     # <chat-message>: message bubble
+    ├── chat-settings.ts    # <chat-settings>: per-conversation settings + security
+    ├── pr-review.ts        # <pr-review>: GitHub pull request review
+    ├── lock-screen.ts      # <lock-screen>: passphrase prompt
+    ├── store.ts            # Local persistence (plain or encrypted)
+    ├── crypto.ts           # PBKDF2 + AES-GCM helpers
+    ├── github.ts           # Minimal GitHub REST client
+    └── theme.ts            # Light / dark / system theme
+public/                     # index.html, assets, compiled client JS
+docs/screenshots/           # README images
+```
+
+### Scripts
+
+| Command | What it does |
+|---|---|
+| `npm start` | Build everything and start the web server |
+| `npm run electron` | Build everything and open the desktop app |
+| `npm run build` | Compile server (`dist/`) and client (`public/*.js`) |
+
+## Roadmap & known limitations
+
+- [ ] English UI / i18n (the interface is currently in Spanish)
+- [ ] Show the routine's final output in the chat (the fire endpoint only returns the session link)
+- [ ] Packaged desktop installers (Windows / macOS / Linux)
+- [ ] Inline review comments on specific diff lines
+- Fine-grained tokens can't enumerate their own repositories (a GitHub API limitation). See [Which token should I use?](#which-token-should-i-use)
+
+## Contributing
+
+Contributions are welcome! Read [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
+
+## License
+
+[MIT](LICENSE) © rodrireddev
+
+---
+
+<sub>Routine Chat is an independent open-source project. It is not affiliated with, endorsed by, or sponsored by Anthropic or GitHub. "Claude" and "GitHub" are trademarks of their respective owners.</sub>

@@ -1,6 +1,31 @@
 {
   "name": "github-routine-api",
   "version": "0.1.0",
+  "description": "Local chat-style desktop & web client to fire Claude Code Routines and review the GitHub pull requests they produce.",
+  "keywords": [
+    "claude",
+    "claude-code",
+    "routines",
+    "github",
+    "pull-requests",
+    "code-review",
+    "electron",
+    "web-components",
+    "typescript"
+  ],
+  "license": "MIT",
+  "author": "rodrireddev",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rodrireddev/github-routine-api.git"
+  },
+  "homepage": "https://github.com/rodrireddev/github-routine-api#readme",
+  "bugs": {
+    "url": "https://github.com/rodrireddev/github-routine-api/issues"
+  },
+  "engines": {
+    "node": ">=22.9"
+  },
   "private": true,
   "type": "module",
   "scripts": {
