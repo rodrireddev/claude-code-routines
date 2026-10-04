@@ -106,10 +106,7 @@ export class WhatsAppGateway implements ChatGateway {
       });
       this.#client = client;
       await this.#loadOwnIds(client);
-      client.onAnyMessage((message: Message) => {
-        const incoming = this.#toIncoming(message);
-        if (incoming) for (const handler of this.#handlers) void handler(incoming);
-      });
+      client.onAnyMessage((message: Message) => void this.#dispatch(client, message));
       // If WhatsApp Web is opened somewhere else, take the session back.
       client.onStateChange((state) => {
         if (String(state) === "CONFLICT") void client.useHere().catch(() => undefined);
@@ -125,10 +122,26 @@ export class WhatsAppGateway implements ChatGateway {
     }
   }
 
+  /**
+   * Replies in the user's own chat. Sending to a "…@lid" ID can fail on some WhatsApp Web versions,
+   * so the phone-based ID ("…@c.us") of the same chat is tried as a fallback.
+   */
   async send(chatId: string, text: string): Promise<void> {
-    if (!this.#client || this.#state.status !== "connected") throw new Error("WhatsApp is not connected");
-    const sent = await this.#client.sendText(chatId, text);
-    this.#track(sent?.id);
+    const client = this.#client;
+    if (!client || this.#state.status !== "connected") throw new Error("WhatsApp is not connected");
+    const targets = [...new Set([chatId, ...[...this.#ownIds].filter((id) => id.endsWith("@c.us"))])];
+    let lastError: unknown;
+    for (const target of targets) {
+      try {
+        const sent = await client.sendText(target, text);
+        this.#track(sent?.id);
+        return;
+      } catch (e) {
+        lastError = e;
+        console.warn(`[WhatsApp] could not send to ${target}: ${(e as Error)?.message ?? e}`);
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
   }
 
   /** Unlinks the device from WhatsApp and deletes the stored session. */
@@ -183,15 +196,59 @@ export class WhatsAppGateway implements ChatGateway {
       });
       if (lid) this.#ownIds.add(lid);
     } catch { /* older WhatsApp Web versions have no LIDs */ }
+    console.log(`[WhatsApp] connected. Own chat IDs: ${[...this.#ownIds].join(", ") || "(unknown)"}`);
   }
 
   /** Keeps only text messages the owner wrote in their own chat, excluding the bot's replies. */
-  #toIncoming(message: Message): IncomingMessage | null {
-    if (!message?.fromMe || message.type !== "chat" || !message.body) return null;
+  /** Hands self-chat messages to the bot. Errors are logged, never thrown (they would crash the server). */
+  async #dispatch(client: Whatsapp, message: Message): Promise<void> {
+    try {
+      const incoming = await this.#toIncoming(client, message);
+      if (!incoming) return;
+      console.log(`[WhatsApp] command received: ${incoming.text.slice(0, 60)}`);
+      for (const handler of this.#handlers) await handler(incoming);
+    } catch (e) {
+      console.error("[WhatsApp] error handling a message:", e);
+    }
+  }
+
+  /** Keeps only text messages the owner wrote in their own chat, excluding the bot's replies. */
+  async #toIncoming(client: Whatsapp, message: Message): Promise<IncomingMessage | null> {
+    if (!message) return null;
+    const body = (message.body ?? (message as { content?: string }).content ?? "").trim();
+    const to = serialize(message.to) || serialize(message.chatId);
+    const from = serialize(message.from);
+    // Every message that looks like a command is logged with the reason it is (not) handled,
+    // so problems can be diagnosed from the server console.
+    const looksLikeCommand = body.startsWith("/");
+    const skip = (reason: string): null => {
+      if (looksLikeCommand) console.log(`[WhatsApp] ignored "${body.slice(0, 30)}" (from ${from} to ${to}, type ${message.type}): ${reason}`);
+      return null;
+    };
+    if (!message.fromMe) return skip("not written by you");
     if (this.#sentIds.has(serialize(message.id))) return null;
-    // In the "Message yourself" chat the recipient is the account itself.
-    if (message.from !== message.to && !this.#ownIds.has(message.to)) return null;
-    return { chatId: message.to, text: message.body };
+    if (!body) return null;
+    if (message.type !== "chat") return skip("not a text message");
+    if (!(await this.#isOwnChat(client, to, from))) return skip("not your own chat");
+    return { chatId: to, text: body };
+  }
+
+  /**
+   * "Message yourself" chat? Depending on the account it is addressed by phone ("…@c.us") or by
+   * LID ("…@lid"), so besides the known IDs we ask WhatsApp whether the contact is the account itself.
+   */
+  async #isOwnChat(client: Whatsapp, to: string, from: string): Promise<boolean> {
+    if (!to) return false;
+    if (to === from || this.#ownIds.has(to)) return true;
+    if (to.endsWith("@g.us") || to.endsWith("@broadcast") || to.endsWith("@newsletter")) return false;
+    try {
+      const contact = await client.getContact(to);
+      if (contact?.isMe) {
+        this.#ownIds.add(to);
+        return true;
+      }
+    } catch { /* unknown contact */ }
+    return false;
   }
 
   #track(id: unknown): void {

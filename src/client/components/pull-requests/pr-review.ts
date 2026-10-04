@@ -1,6 +1,6 @@
 import { locale, t } from "../../core/i18n.js";
 import { h } from "../../core/dom.js";
-import { store } from "../../core/store.js";
+import { githubAuth } from "../../core/github-auth.js";
 import { diagnosticsDialog, manualReposDialog, pickReposDialog, type RepoContext } from "./pr-dialogs.js";
 import { lastRepo, readPrefs, rememberRepo, savePrefs } from "./repo-prefs.js";
 import * as gh from "../../services/github.js";
@@ -68,7 +68,7 @@ export class PrReview extends HTMLElement {
 
   connectedCallback(): void {
     this.#listeners = new AbortController();
-    store.addEventListener("github", () => void this.#render(), { signal: this.#listeners.signal });
+    githubAuth.addEventListener("change", () => void this.#render(), { signal: this.#listeners.signal });
     void this.#render();
   }
 
@@ -83,9 +83,9 @@ export class PrReview extends HTMLElement {
   async #render(): Promise<void> {
     const view = this.#view;
     view.style.display = "contents";
-    if (!store.githubToken) return this.#renderSetup();
+    if (!githubAuth.token) return this.#renderSetup();
     try {
-      this.#login = (await gh.getUser(store.githubToken)).login;
+      this.#login = (await gh.getUser(githubAuth.token)).login;
     } catch (e) {
       this.#renderSetup((e as Error).message);
       return;
@@ -105,8 +105,7 @@ export class PrReview extends HTMLElement {
       btn.loading = true;
       err.textContent = "";
       try {
-        await gh.getUser(token);
-        store.setGithubToken(token);
+        await githubAuth.save(token);
       } catch (e) {
         err.textContent = (e as Error).message;
       } finally {
@@ -170,7 +169,7 @@ export class PrReview extends HTMLElement {
     this.#view.style.display = "contents";
 
     out.addEventListener("click", () => {
-      if (confirm(t("pr.confirmRemoveToken"))) store.setGithubToken("");
+      if (confirm(t("pr.confirmRemoveToken"))) void githubAuth.save("");
     });
     diag.addEventListener("click", () => (diagDialog as unknown as { show(): void }).show());
     add.addEventListener("click", () => (dialog as unknown as { show(): void }).show());
@@ -199,11 +198,11 @@ export class PrReview extends HTMLElement {
       openBtn.loading = true;
       detail.replaceChildren(h("div", { class: "center" }, t("pr.loading")));
       try {
-        const pull = await gh.getPull(store.githubToken, repo, Number(num));
+        const pull = await gh.getPull(githubAuth.token, repo, Number(num));
         void pull;
         if (!this.#prefs.manual.includes(repo)) this.#prefs.manual.push(repo);
         this.#savePrefs();
-        this.#allRepos = this.#allRepos.some((r) => r.full_name === repo) ? this.#allRepos : [...this.#allRepos, await gh.getRepo(store.githubToken, repo).catch(() => ({ full_name: repo, private: false }))];
+        this.#allRepos = this.#allRepos.some((r) => r.full_name === repo) ? this.#allRepos : [...this.#allRepos, await gh.getRepo(githubAuth.token, repo).catch(() => ({ full_name: repo, private: false }))];
         this.#prefs.enabled = this.#prefs.enabled && !this.#prefs.enabled.includes(repo) ? [...this.#prefs.enabled, repo] : this.#prefs.enabled;
         this.#populate(select);
         await customElements.whenDefined("sl-select");
@@ -219,7 +218,7 @@ export class PrReview extends HTMLElement {
         const why = status === 404 || status === 403
           ? t("pr.noAccess", { status, repo, num })
           : (e as Error).message;
-        const tok = store.githubToken;
+        const tok = githubAuth.token;
         const kind = tok.startsWith("github_pat_") ? "fine-grained (github_pat_…)" : tok.startsWith("ghp_") ? "classic (ghp_…)" : t("pr.kindUnknown");
         const lines = [why, "", t("pr.tokenInUse", { kind, last: tok.slice(-4) })];
         if (status === 404 || status === 403) {
@@ -287,7 +286,7 @@ export class PrReview extends HTMLElement {
     const queue = repos.slice(0, 150).map((r) => r.full_name);
     const worker = async (): Promise<void> => {
       for (let name = queue.shift(); name; name = queue.shift()) {
-        this.#access.set(name, await gh.probeReviewAccess(store.githubToken, name));
+        this.#access.set(name, await gh.probeReviewAccess(githubAuth.token, name));
       }
     };
     await Promise.all(Array.from({ length: 8 }, worker));
@@ -299,11 +298,11 @@ export class PrReview extends HTMLElement {
     };
     try {
       const owners = this.#prefs.manual.filter((n) => !n.includes("/"));
-      const { repos: found, warnings, orgs } = await gh.discoverRepos(store.githubToken, owners, this.#login);
+      const { repos: found, warnings, orgs } = await gh.discoverRepos(githubAuth.token, owners, this.#login);
       this.#allRepos = found;
       this.#orgs = orgs;
       // Un token classic ve todo lo que ve tu usuario: no hace falta detectar acceso repo a repo.
-      const classic = store.githubToken.startsWith("ghp_");
+      const classic = githubAuth.token.startsWith("ghp_");
       if (!this.#prefs.enabled && !classic) {
         select.disabled = true;
         select.placeholder = t("load.detecting");
@@ -352,7 +351,7 @@ export class PrReview extends HTMLElement {
     const list = this.#listEl;
     list.replaceChildren(h("div", { class: "center" }, t("pr.loading")));
     try {
-      this.#pulls = await gh.listPulls(store.githubToken, repo);
+      this.#pulls = await gh.listPulls(githubAuth.token, repo);
     } catch (e) {
       list.replaceChildren(h("div", { class: "err", style: "padding:12px" }, (e as Error).message));
       return;
@@ -382,7 +381,7 @@ export class PrReview extends HTMLElement {
     let pulls: gh.OpenPull[];
     try {
       const owners = [this.#login, ...this.#orgs, ...this.#prefs.manual.filter((n) => !n.includes("/"))];
-      pulls = await gh.searchOpenPulls(store.githubToken, [...new Set(owners)], this.#login);
+      pulls = await gh.searchOpenPulls(githubAuth.token, [...new Set(owners)], this.#login);
     } catch (e) {
       list.replaceChildren(h("div", { class: "err", style: "padding:12px" }, (e as Error).message));
       return;
@@ -409,7 +408,7 @@ export class PrReview extends HTMLElement {
   async #openPull(repo: string, number: number, notice = ""): Promise<void> {
     const detail = this.#detailEl;
     detail.replaceChildren(h("div", { class: "center" }, t("pr.loading")));
-    const tok = store.githubToken;
+    const tok = githubAuth.token;
     try {
       const [pull, files, reviews] = await Promise.all([
         gh.getPull(tok, repo, number),
@@ -487,7 +486,7 @@ export class PrReview extends HTMLElement {
     buttons.forEach((b) => (b.loading = true));
     status.textContent = "";
     try {
-      await gh.submitReview(store.githubToken, repo, pull.number, event, body, pull.head.sha);
+      await gh.submitReview(githubAuth.token, repo, pull.number, event, body, pull.head.sha);
       await this.#openPull(repo, pull.number, t("det.sent"));
     } catch (e) {
       status.textContent = (e as Error).message;

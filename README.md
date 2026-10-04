@@ -96,7 +96,7 @@ flowchart LR
 
 - **Routines from the chat UI:** each message goes to the server, which fires the routine with the conversation's trigger ID and token. The call is made server-side, so browser CORS rules don't get in the way.
 - **WhatsApp bot:** the server runs WhatsApp Web in a headless Chrome through [WPPConnect](https://github.com/wppconnect-team/wppconnect) (Puppeteer), linked to your phone with a QR code. It reads the commands you write in your own chat and replies there. The browser profile is kept, so you only scan the QR once.
-- **Pull requests in the UI:** these calls go directly from the browser to `api.github.com`. The bot uses its own token, stored encrypted on the server.
+- **One GitHub token:** it is stored encrypted on the server and shared by the Pull requests view (which calls `api.github.com` from the browser) and the WhatsApp bot.
 
 The request sent to fire a routine is equivalent to:
 
@@ -115,7 +115,7 @@ curl -X POST https://api.anthropic.com/v1/claude_code/routines/$TRIGGER_ID/fire 
 
 1. Open **WhatsApp** in the sidebar and click **Link WhatsApp**.
 2. On your phone go to **WhatsApp → Settings → Linked devices → Link a device**, and scan the QR code.
-3. Add the **GitHub token** the bot should use. You can reuse the one from the Pull requests view.
+3. Make sure a **GitHub token** is set. The app uses one token for everything: if you already entered it in Pull requests, the bot uses it too.
 4. Open your own chat (**“Message yourself”**) and send `/help`.
 
 ### Default commands

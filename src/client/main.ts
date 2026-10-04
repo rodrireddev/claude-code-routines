@@ -4,6 +4,7 @@ import "./components/login-screen.js";
 import "./components/lock-screen.js";
 import "./components/routine-chat.js";
 import { authStatus } from "./core/api.js";
+import { githubAuth } from "./core/github-auth.js";
 import { store } from "./core/store.js";
 
 /**
@@ -25,7 +26,19 @@ function mount(): void {
     lock.addEventListener("unlocked", mount);
     document.body.append(lock);
   } else {
-    document.body.append(document.createElement("routine-chat"));
+    void loadGithubToken().finally(() => document.body.append(document.createElement("routine-chat")));
+  }
+}
+
+/**
+ * The GitHub token lives on the server (one token for the whole app). Older versions kept it in
+ * browser storage: it is moved to the server once and removed from the browser.
+ */
+async function loadGithubToken(): Promise<void> {
+  await githubAuth.load();
+  if (store.githubToken) {
+    if (!githubAuth.token) await githubAuth.save(store.githubToken).catch(() => undefined);
+    if (githubAuth.token) store.setGithubToken("");
   }
 }
 

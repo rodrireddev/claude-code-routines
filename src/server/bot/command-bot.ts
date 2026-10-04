@@ -58,7 +58,8 @@ export class CommandBot {
       if (!command.enabled) return await this.#reply(msg.chatId, messages.disabledCommand(command.trigger));
       await this.#run(command, parsed.args, msg.chatId);
     } catch (e) {
-      await this.#reply(msg.chatId, messages.error((e as Error).message));
+      await this.#reply(msg.chatId, messages.error((e as Error).message)).catch((sendError) =>
+        console.error("[bot] could not send the error reply:", sendError));
     }
   }
 

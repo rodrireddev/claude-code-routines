@@ -6,6 +6,7 @@ import { SessionAuth } from "./http/auth.js";
 import { clientIp, HttpError, sendJson } from "./http/http-utils.js";
 import { Router } from "./http/router.js";
 import { authRoutes } from "./http/routes/auth-routes.js";
+import { githubRoutes } from "./http/routes/github-routes.js";
 import { routineRoutes } from "./http/routes/routine-routes.js";
 import { whatsappRoutes } from "./http/routes/whatsapp-routes.js";
 import { applySecurityHeaders, assertSameOrigin, RateLimiter } from "./http/security.js";
@@ -43,6 +44,7 @@ export function createApp(config: AppConfig): App {
   authRoutes(router, auth, config.trustProxy);
   routineRoutes(router, routines, config);
   whatsappRoutes(router, whatsapp, settings);
+  githubRoutes(router, settings);
 
   const files = new StaticFiles([
     { prefix: "/", dir: join(ROOT_DIR, "public") },

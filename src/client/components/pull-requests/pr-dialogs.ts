@@ -1,7 +1,7 @@
 /** Dialogs of the Pull requests view: choose repos, add repos by hand, and diagnostics. */
 import { h } from "../../core/dom.js";
 import { t } from "../../core/i18n.js";
-import { store } from "../../core/store.js";
+import { githubAuth } from "../../core/github-auth.js";
 import * as gh from "../../services/github.js";
 import type { GhRepo } from "../../services/github.js";
 import type { SlButton, SlInput } from "../../core/types.js";
@@ -44,7 +44,7 @@ export function pickReposDialog(ctx: RepoContext, onChange: () => void): HTMLEle
   detect.addEventListener("click", async () => {
     detect.loading = true;
     status.textContent = t("pick.checking");
-    const results = await Promise.all(all.map((r) => gh.probeReviewAccess(store.githubToken, r.full_name)));
+    const results = await Promise.all(all.map((r) => gh.probeReviewAccess(githubAuth.token, r.full_name)));
     boxes.forEach((b, i) => { if (results[i] !== null) b.checked = results[i] === true; });
     const n = results.filter((x) => x === true).length;
     const u = results.filter((x) => x === null).length;
@@ -74,7 +74,7 @@ export function diagnosticsDialog(ctx: RepoContext): HTMLElement {
   const pre = h("pre", { style: "white-space:pre-wrap;word-break:break-word;font:12px/1.5 var(--sl-font-mono);max-height:55vh;overflow:auto;margin:0" });
   const run = async (): Promise<void> => {
     pre.textContent = t("diag.querying");
-    const tok = store.githubToken;
+    const tok = githubAuth.token;
     const names = (b: unknown): string[] => (Array.isArray(b) ? (b as { full_name?: string; login?: string; private?: boolean }[]).map((x) => `${x.private ? t("diag.private") : ""}${x.full_name ?? x.login}`) : []);
     const paths = [
       "/user",
@@ -139,8 +139,8 @@ export function manualReposDialog(ctx: RepoContext, onChange: (reload: boolean) 
     err.textContent = "";
     try {
       let entry = name;
-      if (isRepo) entry = (await gh.getRepo(store.githubToken, name)).full_name;
-      else await gh.listOwnerRepos(store.githubToken, name); // valida que el dueño existe y es accesible
+      if (isRepo) entry = (await gh.getRepo(githubAuth.token, name)).full_name;
+      else await gh.listOwnerRepos(githubAuth.token, name); // valida que el dueño existe y es accesible
       if (!ctx.prefs.manual.includes(entry)) ctx.prefs.manual.push(entry);
       ctx.savePrefs();
       input.value = "";

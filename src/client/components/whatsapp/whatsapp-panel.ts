@@ -1,12 +1,13 @@
 import { COMMAND_ACTIONS, normalizeTrigger, type CommandAction, type PublicCommand } from "../../../shared/commands.js";
 import { api } from "../../core/api.js";
+import { githubAuth } from "../../core/github-auth.js";
 import { h } from "../../core/dom.js";
 import { t, type Key } from "../../core/i18n.js";
 import { store } from "../../core/store.js";
 import type { SlButton, SlInput } from "../../core/types.js";
 
 interface WhatsAppState { status: "disabled" | "disconnected" | "connecting" | "qr" | "connected"; qr?: string; account?: string; error?: string }
-interface BotSettings { commands: PublicCommand[]; github: { configured: boolean; login: string | null } }
+interface BotSettings { commands: PublicCommand[] }
 
 /** Command being edited. `token` is only sent when the user typed a new one. */
 interface DraftCommand extends Omit<PublicCommand, "routine"> {
@@ -56,8 +57,10 @@ export class WhatsAppPanel extends HTMLElement {
   }
 
   connectedCallback(): void {
+    this.#off = new AbortController();
     void this.#refreshStatus();
     void this.#loadSettings();
+    githubAuth.addEventListener("change", () => this.#renderGithub(), { signal: this.#off.signal });
     // Poll the connection while the panel is visible: fast while a QR is on screen, slow otherwise.
     const tick = (): void => {
       const delay = this.#state.status === "qr" || this.#state.status === "connecting" ? 2000 : 10000;
@@ -69,7 +72,10 @@ export class WhatsAppPanel extends HTMLElement {
     tick();
   }
 
+  #off = new AbortController();
+
   disconnectedCallback(): void {
+    this.#off.abort();
     window.clearTimeout(this.#timer);
   }
 
@@ -129,48 +135,46 @@ export class WhatsAppPanel extends HTMLElement {
   async #loadSettings(): Promise<void> {
     try {
       const settings = await api<BotSettings>("/api/bot/settings");
-      this.#renderGithub(settings.github);
+      this.#renderGithub();
       this.#setCommands(settings.commands);
     } catch (e) {
       this.#root.getElementById("commands")!.replaceChildren(h("div", { class: "err" }, (e as Error).message));
     }
   }
 
-  #renderGithub(github: BotSettings["github"], message = "", error = ""): void {
+  /** The app's single GitHub token (shared with the Pull requests view). */
+  #renderGithub(message = "", error = ""): void {
     const box = this.#root.getElementById("github")!;
     const input = h("sl-input", { type: "password", placeholder: t("wa.tokenPlaceholder"), "password-toggle": "", autocomplete: "off", class: "grow" }) as unknown as SlInput & HTMLElement;
     const save = h("sl-button", { variant: "primary" }, t("wa.save")) as unknown as SlButton & HTMLElement;
     const saveToken = async (token: string): Promise<void> => {
       save.loading = true;
       try {
-        const result = await api<BotSettings["github"]>("/api/bot/github-token", { method: "PUT", body: { token } });
-        this.#renderGithub(result, t("wa.saved"));
+        await githubAuth.save(token);
+        this.#renderGithub(t("wa.saved"));
       } catch (e) {
-        this.#renderGithub(github, "", (e as Error).message);
+        this.#renderGithub("", (e as Error).message);
       }
     };
     save.addEventListener("click", () => input.value.trim() && void saveToken(input.value));
     const row = h("div", { class: "row" }, input, save);
-    if (store.githubToken) {
-      const reuse = h("sl-button", {}, t("wa.useBrowserToken"));
-      reuse.addEventListener("click", () => void saveToken(store.githubToken));
-      row.append(reuse);
-    }
-    if (github.configured) {
+    const configured = !!githubAuth.token;
+    if (configured) {
       const remove = h("sl-button", { variant: "text" }, t("wa.removeToken"));
       remove.addEventListener("click", () => void saveToken(""));
       row.append(remove);
     }
     box.replaceChildren(
       h("h3", {}, h("sl-icon", { name: "github" }), t("wa.github"),
-        h("sl-badge", { variant: github.configured ? "success" : "neutral", pill: "" },
-          github.configured ? t("wa.githubConnected", { login: github.login ?? "?" }) : t("wa.githubMissing"))),
+        h("sl-badge", { variant: configured ? "success" : "neutral", pill: "" },
+          configured ? t("wa.githubConnected", { login: githubAuth.login ?? "?" }) : t("wa.githubMissing"))),
       h("div", { class: "muted" }, t("wa.githubHelp")),
       row,
       message ? h("div", { class: "ok" }, message) : h("span", {}),
       error ? h("div", { class: "err" }, error) : h("span", {}),
     );
   }
+
 
   #setCommands(commands: PublicCommand[]): void {
     this.#commands = commands.map(({ routine, ...c }): DraftCommand =>
