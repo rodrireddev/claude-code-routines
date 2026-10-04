@@ -49,5 +49,15 @@
     "puppeteer": "^24.43.1",
     "qrcode": "^1.5.4"
   },
-  "main": "dist/electron/main.js"
+  "main": "dist/electron/main.js",
+  "overrides": {
+    "rimraf": "^6.1.3",
+    "basic-ftp": "^6.2.2",
+    "sharp": "^0.35.5"
+  },
+  "allowScripts": {
+    "puppeteer": true,
+    "sharp": true,
+    "electron": true
+  }
 }

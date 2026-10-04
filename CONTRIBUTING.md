@@ -34,6 +34,20 @@ See the [README](README.md#project-structure) for a file-by-file overview.
 - **Translations:** UI strings live in `src/client/i18n.ts`. English is the source of truth: the build fails if another language is missing a key. To add a language, add a dictionary and an entry in `LANGUAGES`.
 - **Screenshots:** if you change the UI, consider updating the images in `docs/screenshots/`.
 
+## Dependency overrides
+
+`package.json` pins a few transitive dependencies of WPPConnect/Puppeteer to fixed versions (`overrides`), removing deprecation warnings and known vulnerabilities:
+
+| Package | Why |
+|---|---|
+| `rimraf` → 6 | v3 is deprecated and pulls `glob@7` + `inflight` (memory leak). WPPConnect only uses it in code paths this app doesn't run (ffmpeg audio conversion, Puppeteer's profile plugin; we launch the browser ourselves). |
+| `basic-ftp` → 6.2.2 | Fixes a DoS advisory (only reachable through FTP proxy URLs, which we never use). |
+| `sharp` → 0.35.5 | Fixes libvips/libheif advisories (WPPConnect uses it only for stickers). |
+
+`npm audit` still lists three issues with no compatible fix: `extract-zip` (no patched version exists; Puppeteer uses it only to unzip Chrome from Google when downloading it), and `file-type` / `got` inside WPPConnect (file sending and its update check, neither used here). Re-check them when upgrading WPPConnect.
+
+`allowScripts` approves the install scripts of `puppeteer` (downloads Chrome), `sharp` (native binary) and `electron` (desktop runtime).
+
 ## Pull requests
 
 1. Fork the repo and create a branch from `main`.
