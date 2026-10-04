@@ -6,6 +6,8 @@ import type { SlButton, SlInput, SlTextarea } from "./types.js";
 interface SlSelect extends HTMLElement { value: string | string[]; disabled: boolean; placeholder: string }
 
 const REPO_KEY = "routine-chat.repo.v1";
+/** Valor especial del selector: todos los PRs abiertos visibles para el token, de cualquier repo. */
+const ALL = "__all__";
 const PREFS_KEY = "routine-chat.repos.v1";
 
 interface RepoPrefs { manual: string[]; /** null = mostrar todos los que devuelve GitHub */ enabled: string[] | null }
@@ -140,6 +142,7 @@ export class PrReview extends HTMLElement {
 
   #prefs = readPrefs();
   #allRepos: GhRepo[] = [];
+  #orgs: string[] = [];
   /** Resultado de la detección de acceso por repo (modo automático). */
   #access = new Map<string, boolean | null>();
 
@@ -259,9 +262,12 @@ export class PrReview extends HTMLElement {
   #populate(select: SlSelect): void {
     const repos = this.#visibleRepos();
     const manual = new Set(this.#prefs.manual.filter((n) => n.includes("/")));
-    select.replaceChildren(...repos.map((r) =>
-      h("sl-option", { value: r.full_name }, `${r.private ? "🔒 " : ""}${r.full_name}${r.private ? "" : " · público"}${manual.has(r.full_name) ? " (manual)" : ""}`)));
-    if (this.#repo && !repos.some((r) => r.full_name === this.#repo)) {
+    select.replaceChildren(
+      h("sl-option", { value: ALL }, "★ Todos mis PRs abiertos"),
+      h("sl-divider", {}),
+      ...repos.map((r) =>
+        h("sl-option", { value: r.full_name }, `${r.private ? "🔒 " : ""}${r.full_name}${r.private ? "" : " · público"}${manual.has(r.full_name) ? " (manual)" : ""}`)));
+    if (this.#repo && this.#repo !== ALL && !repos.some((r) => r.full_name === this.#repo)) {
       select.value = "";
       this.#repo = "";
       this.#listEl.replaceChildren();
@@ -432,9 +438,12 @@ export class PrReview extends HTMLElement {
     };
     try {
       const owners = this.#prefs.manual.filter((n) => !n.includes("/"));
-      const { repos: found, warnings } = await gh.discoverRepos(store.githubToken, owners, this.#login);
+      const { repos: found, warnings, orgs } = await gh.discoverRepos(store.githubToken, owners, this.#login);
       this.#allRepos = found;
-      if (!this.#prefs.enabled) {
+      this.#orgs = orgs;
+      // Un token classic ve todo lo que ve tu usuario: no hace falta detectar acceso repo a repo.
+      const classic = store.githubToken.startsWith("ghp_");
+      if (!this.#prefs.enabled && !classic) {
         select.disabled = true;
         select.placeholder = "Detectando repositorios del token…";
         placeholder(`GitHub devolvió ${found.length} repositorios. Detectando en cuáles tiene permiso tu token…`);
@@ -446,16 +455,18 @@ export class PrReview extends HTMLElement {
       const repos = this.#visibleRepos();
       let saved = "";
       try { saved = localStorage.getItem(REPO_KEY) ?? ""; } catch { /* ignorar */ }
-      if (!this.#repo && repos.some((r) => r.full_name === saved)) {
+      // Por defecto se abre "Todos mis PRs abiertos", salvo que el último repo elegido siga disponible.
+      const target = saved && (saved === ALL || repos.some((r) => r.full_name === saved)) ? saved : ALL;
+      if (!this.#repo) {
         await customElements.whenDefined("sl-select");
         await (select as unknown as { updateComplete: Promise<unknown> }).updateComplete;
-        select.value = saved;
-        this.#repo = saved;
-        void this.#loadPulls(saved);
+        select.value = target;
+        this.#repo = target;
+        void this.#loadPulls(target);
       }
       const shown = this.#visibleRepos().length;
       const lines = [`GitHub devolvió ${found.length} repositorios.`];
-      if (!this.#prefs.enabled) {
+      if (!this.#prefs.enabled && !classic) {
         const confirmed = [...this.#access.values()].filter((v) => v === true).length;
         lines.push(this.#access.size && [...this.#access.values()].some((v) => v !== false)
           ? `Detección automática: ${shown} con permiso de Pull requests del token (${confirmed} confirmados).`
@@ -476,6 +487,7 @@ export class PrReview extends HTMLElement {
   get #detailEl(): HTMLElement { return this.#root.querySelector(".detail")!; }
 
   async #loadPulls(repo: string): Promise<void> {
+    if (repo === ALL) return this.#loadAllPulls();
     const list = this.#listEl;
     list.replaceChildren(h("div", { class: "center" }, "Cargando…"));
     try {
@@ -502,6 +514,37 @@ export class PrReview extends HTMLElement {
     }));
   }
 
+  /** Lista los PRs abiertos de todos los repos visibles para el token (vía búsqueda de GitHub). */
+  async #loadAllPulls(): Promise<void> {
+    const list = this.#listEl;
+    list.replaceChildren(h("div", { class: "center" }, "Buscando PRs abiertos…"));
+    let pulls: gh.OpenPull[];
+    try {
+      const owners = [this.#login, ...this.#orgs, ...this.#prefs.manual.filter((n) => !n.includes("/"))];
+      pulls = await gh.searchOpenPulls(store.githubToken, [...new Set(owners)], this.#login);
+    } catch (e) {
+      list.replaceChildren(h("div", { class: "err", style: "padding:12px" }, (e as Error).message));
+      return;
+    }
+    if (this.#repo !== ALL) return;
+    if (pulls.length === 0) {
+      list.replaceChildren(h("div", { class: "center" }, "No hay Pull Requests abiertos en tus repos."));
+      return;
+    }
+    list.replaceChildren(...pulls.map((p) => {
+      const el = h("div", { class: "pr" },
+        h("b", {}, p.title),
+        h("span", { class: "muted" }, `${p.repo} #${p.number} · ${p.author}${p.draft ? " · borrador" : ""}`));
+      el.addEventListener("click", () => {
+        list.querySelectorAll(".pr").forEach((x) => x.classList.remove("sel"));
+        el.classList.add("sel");
+        void this.#openPull(p.repo, p.number);
+      });
+      return el;
+    }));
+    if (!this.#current) this.#detailEl.replaceChildren(h("div", { class: "center" }, `${pulls.length} PRs abiertos. Elige uno para revisarlo.`));
+  }
+
   async #openPull(repo: string, number: number, notice = ""): Promise<void> {
     const detail = this.#detailEl;
     detail.replaceChildren(h("div", { class: "center" }, "Cargando…"));
@@ -512,7 +555,7 @@ export class PrReview extends HTMLElement {
         gh.listFiles(t, repo, number),
         gh.listReviews(t, repo, number),
       ]);
-      if (repo !== this.#repo) return;
+      if (this.#repo !== ALL && repo !== this.#repo) return;
       this.#current = pull;
       this.#renderDetail(repo, pull, files, reviews, notice);
     } catch (e) {
@@ -561,7 +604,11 @@ export class PrReview extends HTMLElement {
       btn("Solicitar cambios", "danger", "REQUEST_CHANGES", "x-lg"),
       btn("Comentar", "default", "COMMENT", "chat-left-text"),
     ];
-    const form = h("div", { class: "form" }, textarea, h("div", { class: "actions" }, ...buttons), status);
+    const own = pull.user.login === this.#login;
+    if (own) { buttons[0].setAttribute("disabled", ""); buttons[1].setAttribute("disabled", ""); }
+    const form = h("div", { class: "form" }, textarea, h("div", { class: "actions" }, ...buttons),
+      own ? h("div", { class: "muted" }, "Este PR lo abrió tu propia cuenta: GitHub no permite aprobarlo ni solicitar cambios con ella. Puedes comentarlo, o aprobarlo desde otra cuenta.") : null,
+      status);
 
     this.#detailEl.replaceChildren(
       h("h2", {}, pull.title), head,

@@ -87,7 +87,7 @@ export async function listOwnerRepos(t: string, owner: string): Promise<GhRepo[]
   }
 }
 
-export interface RepoDiscovery { repos: GhRepo[]; warnings: string[] }
+export interface RepoDiscovery { repos: GhRepo[]; warnings: string[]; orgs: string[] }
 
 /**
  * Junta todo lo que se puede descubrir: /user/repos, los repos de cada organización del usuario
@@ -124,26 +124,45 @@ export async function discoverRepos(t: string, extraOwners: string[], login = ""
   } catch (e) {
     warnings.push(`La búsqueda de PRs falló: ${(e as Error).message}`);
   }
-  return { repos: [...map.values()], warnings };
+  return { repos: [...map.values()], warnings, orgs };
 }
 
-interface SearchItem { repository_url: string }
+interface SearchItem {
+  repository_url: string;
+  number: number;
+  title: string;
+  draft?: boolean;
+  user: { login: string };
+  updated_at: string;
+}
 
-/** Repos (owner/name) que tienen PRs abiertos visibles para el token. */
-export async function searchPullRepos(t: string, owners: string[], login: string): Promise<string[]> {
+export interface OpenPull { repo: string; number: number; title: string; draft: boolean; author: string; updatedAt: string }
+
+/** PRs abiertos visibles para el token: en repos de los dueños dados, donde participas o te piden review. */
+export async function searchOpenPulls(t: string, owners: string[], login: string): Promise<OpenPull[]> {
   const queries = [
-    ...owners.map((o) => `is:pr is:open user:${o}`),
+    ...owners.filter(Boolean).map((o) => `is:pr is:open user:${o}`),
     ...(login ? [`is:pr is:open involves:${login}`, `is:pr is:open review-requested:${login}`] : []),
   ];
-  const names = new Set<string>();
+  const found = new Map<string, OpenPull>();
   for (const q of queries) {
     for (let page = 1; page <= 3; page++) {
       const res = await gh<{ items: SearchItem[] }>(t, `/search/issues?q=${encodeURIComponent(q)}&per_page=100&page=${page}`);
-      for (const it of res.items) names.add(it.repository_url.replace(/^.*\/repos\//, ""));
+      for (const it of res.items) {
+        const repo = it.repository_url.replace(/^.*\/repos\//, "");
+        found.set(`${repo}#${it.number}`, {
+          repo, number: it.number, title: it.title, draft: !!it.draft, author: it.user.login, updatedAt: it.updated_at,
+        });
+      }
       if (res.items.length < 100) break;
     }
   }
-  return [...names];
+  return [...found.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+/** Repos (owner/name) que tienen PRs abiertos visibles para el token. */
+export async function searchPullRepos(t: string, owners: string[], login: string): Promise<string[]> {
+  return [...new Set((await searchOpenPulls(t, owners, login)).map((p) => p.repo))];
 }
 
 export const getRepo = (t: string, fullName: string) => gh<GhRepo>(t, `/repos/${fullName}`);
