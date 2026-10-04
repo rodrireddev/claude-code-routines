@@ -45,8 +45,9 @@
   },
   "dependencies": {
     "@shoelace-style/shoelace": "^2.20.1",
-    "qrcode": "^1.5.4",
-    "whatsapp-web.js": "^1.34.7"
+    "@wppconnect-team/wppconnect": "^1.41.3",
+    "puppeteer": "^24.43.1",
+    "qrcode": "^1.5.4"
   },
   "main": "dist/electron/main.js"
 }

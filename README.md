@@ -63,7 +63,7 @@ It runs **on your machine** (desktop app or `localhost`) or on **your own server
 
 ## Quick start
 
-**Requirements:** Node.js 22.9+ and npm. `npm install` also downloads the Chrome that Puppeteer uses for WhatsApp.
+**Requirements:** Node.js 22.9+ and npm. The WhatsApp bot uses your installed **Google Chrome** (or the Chrome Puppeteer downloads on `npm install`, or `PUPPETEER_EXECUTABLE_PATH`).
 
 ```bash
 git clone https://github.com/rodrireddev/github-routine-api.git
@@ -88,14 +88,14 @@ Then:
 ```mermaid
 flowchart LR
     UI["Browser / Electron<br/>Web Components UI"] -- "REST + session cookie" --> S["Node server<br/>(local or deployed)"]
-    WA["Your WhatsApp<br/>(“Message yourself”)"] <-- "WhatsApp Web<br/>(whatsapp-web.js + Puppeteer)" --> S
+    WA["Your WhatsApp<br/>(“Message yourself”)"] <-- "WhatsApp Web<br/>(WPPConnect + Puppeteer)" --> S
     S -- "fire routine" --> A["Anthropic API"]
     S -- "PRs for the bot" --> G["api.github.com"]
     UI -- "PRs in the UI (your token)" --> G
 ```
 
 - **Routines from the chat UI:** each message goes to the server, which fires the routine with the conversation's trigger ID and token. The call is made server-side, so browser CORS rules don't get in the way.
-- **WhatsApp bot:** the server runs WhatsApp Web in a headless Chrome (Puppeteer), linked to your phone with a QR code. It reads the commands you write in your own chat and replies there.
+- **WhatsApp bot:** the server runs WhatsApp Web in a headless Chrome through [WPPConnect](https://github.com/wppconnect-team/wppconnect) (Puppeteer), linked to your phone with a QR code. It reads the commands you write in your own chat and replies there. The browser profile is kept, so you only scan the QR once.
 - **Pull requests in the UI:** these calls go directly from the browser to `api.github.com`. The bot uses its own token, stored encrypted on the server.
 
 The request sent to fire a routine is equivalent to:
@@ -137,7 +137,7 @@ Commands ship in English. In **WhatsApp → Commands** you can rename them, disa
 - **Approvals always need a yes.** An approval is never executed without an explicit `yes`.
 - **No self-approval.** GitHub doesn't allow approving your own PRs. The bot refuses those up front.
 
-> ⚠️ whatsapp-web.js automates WhatsApp Web, which is not an official WhatsApp API and may break when WhatsApp changes. WhatsApp could restrict accounts that automate it. Link an account you are comfortable using this way.
+> ⚠️ WPPConnect automates WhatsApp Web, which is not an official WhatsApp API and may break when WhatsApp changes. WhatsApp could restrict accounts that automate it. Link an account you are comfortable using this way.
 
 ## Reviewing pull requests
 
@@ -186,7 +186,7 @@ You can change everything from the UI. The server reads optional settings from a
 | `DATA_DIR` | Where the encrypted bot settings and the WhatsApp session are stored. | `./data` |
 | `TRUST_PROXY` | Set to `true` behind a reverse proxy that terminates HTTPS. The app then honours `X-Forwarded-Proto`/`For` (secure cookies, HSTS, per-IP limits). | `false` |
 | `WHATSAPP_ENABLED` | Set to `false` to disable the WhatsApp bot. | `true` |
-| `PUPPETEER_EXECUTABLE_PATH` | Chrome/Chromium used for WhatsApp Web. Leave it empty to use the browser Puppeteer installs. | – |
+| `PUPPETEER_EXECUTABLE_PATH` | Chrome/Chromium used for WhatsApp Web. If empty, the installed Google Chrome is used, then the one Puppeteer downloads. | – |
 | `ROUTINE_TRIGGER_ID` / `ROUTINE_TOKEN` | Fallback routine for chat conversations without their own. | – |
 
 ## Deploying to a server
@@ -246,7 +246,7 @@ src/
 │   │   └── routes/          # auth, routines, WhatsApp + bot settings
 │   ├── bot/                 # Command bot: ports, use cases, WhatsApp message formatting
 │   ├── services/            # Routine firing, bot settings (validation, secret masking)
-│   ├── infrastructure/      # Adapters: WhatsApp (whatsapp-web.js), GitHub, encrypted file store
+│   ├── infrastructure/      # Adapters: WhatsApp (WPPConnect), GitHub, encrypted file store
 │   └── __tests__/           # node:test suites
 ├── electron/main.ts         # Desktop wrapper (local mode)
 └── client/                  # Browser UI (Web Components, compiled to public/js)
