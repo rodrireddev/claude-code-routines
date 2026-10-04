@@ -8,6 +8,7 @@ import type { SlButton, SlInput } from "../../core/types.js";
 
 interface WhatsAppState { status: "disabled" | "disconnected" | "connecting" | "qr" | "connected"; qr?: string; account?: string; error?: string }
 interface BotSettings { commands: PublicCommand[] }
+interface ActivityEntry { at: string; kind: "info" | "seen" | "received" | "ignored" | "sent" | "error"; text: string }
 
 /** Command being edited. `token` is only sent when the user typed a new one. */
 interface DraftCommand extends Omit<PublicCommand, "routine"> {
@@ -46,11 +47,17 @@ export class WhatsAppPanel extends HTMLElement {
         .cmd .routine { display:grid; grid-template-columns:1fr 1fr auto; gap:var(--sl-spacing-small); align-items:end; }
         @media (max-width:700px) { .cmd .head, .cmd .routine { grid-template-columns:1fr; } }
         code { font-family:var(--sl-font-mono); }
+        [hidden] { display:none !important; }
+        .log { display:grid; gap:4px; max-height:280px; overflow:auto; font-size:var(--sl-font-size-small); }
+        .act { display:grid; grid-template-columns:auto auto 1fr; gap:var(--sl-spacing-x-small); align-items:baseline; }
+        .act .time { color:var(--sl-color-neutral-500); font-family:var(--sl-font-mono); font-size:var(--sl-font-size-x-small); }
+        .act .text { word-break:break-word; font-family:var(--sl-font-mono); font-size:var(--sl-font-size-x-small); }
         sl-badge::part(base) { font-size:var(--sl-font-size-x-small); }
       </style>
       <div class="page">
         <div class="intro">${t("wa.intro")}</div>
         <section id="connection"></section>
+        <section id="activity"></section>
         <section id="github"></section>
         <section id="commands"></section>
       </div>`;
@@ -63,7 +70,7 @@ export class WhatsAppPanel extends HTMLElement {
     githubAuth.addEventListener("change", () => this.#renderGithub(), { signal: this.#off.signal });
     // Poll the connection while the panel is visible: fast while a QR is on screen, slow otherwise.
     const tick = (): void => {
-      const delay = this.#state.status === "qr" || this.#state.status === "connecting" ? 2000 : 10000;
+      const delay = this.#state.status === "disconnected" || this.#state.status === "disabled" ? 10000 : 2500;
       this.#timer = window.setTimeout(() => {
         if (this.offsetParent !== null) void this.#refreshStatus();
         tick();
@@ -88,6 +95,42 @@ export class WhatsAppPanel extends HTMLElement {
       this.#state = { status: "disconnected", error: (e as Error).message };
     }
     this.#renderConnection();
+    if (this.#state.status === "connected") {
+      const { activity } = await api<{ activity: ActivityEntry[] }>("/api/whatsapp/activity").catch(() => ({ activity: [] }));
+      this.#renderActivity(activity);
+    } else {
+      this.#root.getElementById("activity")!.replaceChildren();
+      this.#root.getElementById("activity")!.hidden = true;
+    }
+  }
+
+  /** Live log of what the app sees in the own chat, plus a test button: makes "no reply" diagnosable. */
+  #renderActivity(activity: ActivityEntry[], error = ""): void {
+    const box = this.#root.getElementById("activity")!;
+    box.hidden = false;
+    const test = h("sl-button", { size: "small" }, h("sl-icon", { slot: "prefix", name: "send" }), t("wa.sendTest")) as unknown as SlButton & HTMLElement;
+    test.addEventListener("click", async () => {
+      test.loading = true;
+      try {
+        const result = await api<{ activity: ActivityEntry[] }>("/api/whatsapp/test", { method: "POST", body: {} });
+        this.#renderActivity(result.activity);
+      } catch (e) {
+        const { activity: latest } = await api<{ activity: ActivityEntry[] }>("/api/whatsapp/activity").catch(() => ({ activity }));
+        this.#renderActivity(latest, (e as Error).message);
+      }
+    });
+    const variant = { info: "neutral", seen: "neutral", received: "primary", ignored: "warning", sent: "success", error: "danger" } as const;
+    const rows = activity.slice(0, 25).map((a) => h("div", { class: "act" },
+      h("span", { class: "time" }, new Date(a.at).toLocaleTimeString()),
+      h("sl-badge", { variant: variant[a.kind] }, a.kind),
+      h("span", { class: "text" }, a.text)));
+    box.replaceChildren(
+      h("h3", {}, h("sl-icon", { name: "activity" }), t("wa.activity")),
+      h("div", { class: "muted" }, t("wa.activityHelp")),
+      h("div", { class: "row" }, test),
+      error ? h("div", { class: "err" }, error) : h("span", {}),
+      rows.length ? h("div", { class: "log" }, ...rows) : h("div", { class: "muted" }, t("wa.noActivity")),
+    );
   }
 
   #renderConnection(): void {

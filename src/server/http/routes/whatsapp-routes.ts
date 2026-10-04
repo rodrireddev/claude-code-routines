@@ -16,6 +16,18 @@ export function whatsappRoutes(router: Router, whatsapp: WhatsAppGateway, settin
     sendJson(res, 202, { ...whatsapp.state, status: "connecting" });
   });
 
+  /** What the gateway saw recently (messages, reasons they were ignored, send results). */
+  router.on("GET", "/api/whatsapp/activity", (_req, res) => sendJson(res, 200, { activity: whatsapp.activity }));
+
+  router.on("POST", "/api/whatsapp/test", async (_req, res) => {
+    try {
+      await whatsapp.sendTest();
+    } catch (e) {
+      throw new HttpError(502, (e as Error).message);
+    }
+    sendJson(res, 200, { activity: whatsapp.activity });
+  });
+
   router.on("POST", "/api/whatsapp/logout", async (_req, res) => {
     await whatsapp.logout();
     sendJson(res, 200, whatsapp.state);

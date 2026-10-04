@@ -24,6 +24,15 @@ export interface WhatsAppOptions {
 
 type MessageHandler = (msg: IncomingMessage) => void | Promise<void>;
 
+/** One line of the activity log shown in the UI (and printed to the console) to diagnose the bot. */
+export interface ActivityEntry {
+  at: string;
+  kind: "info" | "seen" | "received" | "ignored" | "sent" | "error";
+  text: string;
+}
+
+const MAX_ACTIVITY = 60;
+
 const MAX_TRACKED_IDS = 500;
 const POLL_INTERVAL_MS = 3000;
 
@@ -75,6 +84,9 @@ export class WhatsAppGateway implements ChatGateway {
   #handlers: MessageHandler[] = [];
   /** IDs of messages the bot sent, so its own replies are never treated as commands. */
   #sentIds = new Set<string>();
+  #activity: ActivityEntry[] = [];
+  /** Last poll diagnostics, to log only when they change. */
+  #lastPollDiag = "";
   /** Messages already handled (they can arrive through several sources). */
   #processed = new Set<string>();
   /** Unix time (s) of the connection: older messages are history, not commands. */
@@ -102,6 +114,18 @@ export class WhatsAppGateway implements ChatGateway {
   /** Written once WhatsApp is connected, so startup only resumes sessions that were really linked. */
   get #linkedMarker(): string {
     return join(this.#sessionDir, ".linked");
+  }
+
+  /** Most recent first. */
+  get activity(): ActivityEntry[] {
+    return [...this.#activity].reverse();
+  }
+
+  /** Sends a test message to the own chat: checks the sending path independently of commands. */
+  async sendTest(): Promise<void> {
+    const target = [...this.#ownIds].find((id) => id.endsWith("@lid")) ?? [...this.#ownIds][0];
+    if (!target) throw new Error("Own chat unknown: is WhatsApp connected?");
+    await this.send(target, "🤖 Test message from Routine Chat ✅ — sending works. Now try /help");
   }
 
   onMessage(handler: MessageHandler): void {
@@ -169,10 +193,11 @@ export class WhatsAppGateway implements ChatGateway {
       try {
         const sent = await client.sendText(target, text);
         this.#track(sent?.id);
+        this.#log("sent", `reply sent to ${target}: "${text.slice(0, 40).replace(/\n/g, " ")}…"`);
         return;
       } catch (e) {
         lastError = e;
-        console.warn(`[WhatsApp] could not send to ${target}: ${(e as Error)?.message ?? e}`);
+        this.#log("error", `could not send to ${target}: ${(e as Error)?.message ?? e}`);
       }
     }
     throw lastError instanceof Error ? lastError : new Error(String(lastError));
@@ -209,6 +234,7 @@ export class WhatsAppGateway implements ChatGateway {
   }
 
   #onStatus(status: string): void {
+    this.#log("info", `WhatsApp Web status: ${status}`);
     if (status === "qrReadSuccess" || status === "isLogged") this.#setState({ status: "connecting" });
     if (status === "qrReadFail") this.#setState({ status: "disconnected", error: "The QR code was not scanned in time." });
     if (ENDED.has(status) && !this.#starting) {
@@ -230,7 +256,7 @@ export class WhatsAppGateway implements ChatGateway {
       });
       if (lid) this.#ownIds.add(lid);
     } catch { /* older WhatsApp Web versions have no LIDs */ }
-    console.log(`[WhatsApp] connected. Own chat IDs: ${[...this.#ownIds].join(", ") || "(unknown)"}`);
+    this.#log("info", `connected. Own chat IDs: ${[...this.#ownIds].join(", ") || "(unknown)"}`);
   }
 
   /**
@@ -245,10 +271,10 @@ export class WhatsAppGateway implements ChatGateway {
     try {
       const incoming = await this.#toIncoming(client, message);
       if (!incoming) return;
-      console.log(`[WhatsApp] command received (${message.source}): ${incoming.text.slice(0, 60)}`);
+      this.#log("received", `"${incoming.text.slice(0, 60)}" (via ${message.source})`);
       for (const handler of this.#handlers) await handler(incoming);
     } catch (e) {
-      console.error("[WhatsApp] error handling a message:", e);
+      this.#log("error", `handling a message failed: ${(e as Error)?.message ?? e}`);
     }
   }
 
@@ -258,8 +284,8 @@ export class WhatsAppGateway implements ChatGateway {
     // Every message that looks like a command is logged with the reason it is (not) handled,
     // so problems can be diagnosed from the server console.
     const skip = (reason: string): null => {
-      if (body.startsWith("/")) {
-        console.log(`[WhatsApp] ignored "${body.slice(0, 30)}" (from ${message.from} to ${message.to}, type ${message.type}): ${reason}`);
+      if (body.startsWith("/") || this.#ownIds.has(message.to)) {
+        this.#log("ignored", `"${body.slice(0, 30)}" (via ${message.source}, from ${message.from} to ${message.to}, type ${message.type}): ${reason}`);
       }
       return null;
     };
@@ -297,8 +323,9 @@ export class WhatsAppGateway implements ChatGateway {
         // Encrypted messages are added first as "ciphertext" and become "chat" once decrypted.
         w.WPP.whatsapp.MsgStore.on("change:type", send);
       });
+      this.#log("info", "listening to the message store");
     } catch (e) {
-      console.warn("[WhatsApp] could not attach the message-store listener:", (e as Error).message);
+      this.#log("error", `could not attach the message-store listener: ${(e as Error).message}`);
     }
 
     this.#pollTimer = setInterval(() => void this.#pollOwnChat(client), POLL_INTERVAL_MS);
@@ -308,24 +335,39 @@ export class WhatsAppGateway implements ChatGateway {
     if (this.#polling || !this.#client) return;
     this.#polling = true;
     try {
-      const messages: RawMessage[] = await client.page.evaluate(async (chatIds: string[]) => {
+      const { messages, diag } = await client.page.evaluate(async (chatIds: string[]) => {
         const w = globalThis as unknown as { WPP: { chat: { getMessages(id: string, o: { count: number }): Promise<RawMsgModel[]> } } };
         const out: unknown[] = [];
+        const notes: string[] = [];
         for (const chatId of chatIds) {
           try {
-            for (const msg of await w.WPP.chat.getMessages(chatId, { count: 5 })) {
+            const msgs = await w.WPP.chat.getMessages(chatId, { count: 5 });
+            notes.push(`${chatId}: ok`);
+            for (const msg of msgs) {
               if (!msg?.id?.fromMe) continue;
               out.push({
                 id: msg.id._serialized, fromMe: true, type: msg.type, body: msg.body ?? "",
                 to: msg.to?._serialized ?? chatId, from: msg.from?._serialized ?? "", t: msg.t ?? 0,
               });
             }
-          } catch { /* this ID has no chat */ }
+          } catch (e) {
+            notes.push(`${chatId}: ${(e as Error)?.message ?? e}`);
+          }
         }
-        return out as never;
+        return { messages: out as RawMessage[], diag: notes.join(" · ") };
       }, [...this.#ownIds]);
+      if (diag !== this.#lastPollDiag) {
+        this.#lastPollDiag = diag;
+        this.#log("info", `own-chat check: ${diag}`);
+      }
       for (const m of messages) await this.#dispatch(client, { ...m, source: "poll" });
-    } catch { /* page reloading or closed */ } finally {
+    } catch (e) {
+      const diag = `failed: ${(e as Error)?.message ?? e}`;
+      if (diag !== this.#lastPollDiag) {
+        this.#lastPollDiag = diag;
+        this.#log("error", `own-chat check ${diag}`);
+      }
+    } finally {
       this.#polling = false;
     }
   }
@@ -369,6 +411,12 @@ export class WhatsAppGateway implements ChatGateway {
       await browser?.close();
     } catch { /* already closed */ }
     if (clearSession) rmSync(this.#sessionDir, { recursive: true, force: true });
+  }
+
+  #log(kind: ActivityEntry["kind"], text: string): void {
+    this.#activity.push({ at: new Date().toISOString(), kind, text });
+    if (this.#activity.length > MAX_ACTIVITY) this.#activity.shift();
+    (kind === "error" ? console.error : console.log)(`[WhatsApp] ${kind}: ${text}`);
   }
 
   #setState(state: WhatsAppState): void {
