@@ -94,7 +94,15 @@ export class RoutineChat extends HTMLElement {
     this.#send = root.querySelector("sl-button") as SlButton;
   }
 
+  /** Detaches store/window listeners when the element is discarded (e.g. UI rebuilt after a language change). */
+  #off = new AbortController();
+
+  disconnectedCallback(): void {
+    this.#off.abort();
+  }
+
   connectedCallback(): void {
+    this.#off = new AbortController();
     const root = this.shadowRoot!;
     const lock = root.getElementById("lock")!;
     root.getElementById("gear")!.addEventListener("click", () => this.#settings.show());
@@ -111,9 +119,9 @@ export class RoutineChat extends HTMLElement {
     list.addEventListener("new-conversation", () => this.#settings.show());
     store.addEventListener("change", (e) => {
       if ((e as CustomEvent).detail === "active") setView(false);
-    });
+    }, { signal: this.#off.signal });
     const syncLock = (): void => void (lock.hidden = !store.encrypted);
-    store.addEventListener("security", syncLock);
+    store.addEventListener("security", syncLock, { signal: this.#off.signal });
     syncLock();
     this.#send.addEventListener("click", () => void this.#submit());
     this.#input.addEventListener("keydown", (e) => {
@@ -127,7 +135,7 @@ export class RoutineChat extends HTMLElement {
       this.#renderTitle();
       if (kind !== "meta") this.#renderMessages();
       if (kind === "active" || kind === "list") this.#updateBusy();
-    });
+    }, { signal: this.#off.signal });
     this.#renderTitle();
     this.#renderMessages();
   }

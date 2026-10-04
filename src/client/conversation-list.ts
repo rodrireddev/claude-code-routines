@@ -45,7 +45,15 @@ export class ConversationList extends HTMLElement {
     this.#list = this.shadowRoot!.querySelector("nav")!;
   }
 
+  /** Detaches store/window listeners when the element is discarded (e.g. UI rebuilt after a language change). */
+  #off = new AbortController();
+
+  disconnectedCallback(): void {
+    this.#off.abort();
+  }
+
   connectedCallback(): void {
+    this.#off = new AbortController();
     this.shadowRoot!.querySelector("sl-button")!.addEventListener("click", () => {
       store.create();
       this.#openChat();
@@ -62,9 +70,9 @@ export class ConversationList extends HTMLElement {
       theme.setAttribute("label", t(({ system: "side.themeSystem", light: "side.themeLight", dark: "side.themeDark" } as const)[mode]));
     };
     theme.addEventListener("click", () => void cycleTheme());
-    window.addEventListener("themechange", syncTheme);
+    window.addEventListener("themechange", syncTheme, { signal: this.#off.signal });
     syncTheme();
-    store.addEventListener("change", () => this.#render());
+    store.addEventListener("change", () => this.#render(), { signal: this.#off.signal });
     this.#render();
   }
 

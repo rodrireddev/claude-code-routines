@@ -168,6 +168,7 @@ const en = {
 
   // GitHub client
   "gh.invalidToken": "Invalid or expired token.",
+  "gh.rateLimit": "GitHub rate limit reached for this token. Try again in about {mins} min.",
   "gh.noAccessHint": " (does the token have access to that repository and Pull requests permission?)",
   "gh.orgsFail": "Couldn't list your organizations: {msg}",
   "gh.ownerFail": "Couldn't list the repos of {owner}: {msg}",
@@ -332,6 +333,7 @@ const es: Dict = {
   "det.sent": "✓ Review enviada.",
 
   "gh.invalidToken": "Token inválido o expirado.",
+  "gh.rateLimit": "GitHub alcanzó el límite de peticiones para este token. Vuelve a intentarlo en unos {mins} min.",
   "gh.noAccessHint": " (¿el token tiene acceso a ese repositorio y permiso de Pull requests?)",
   "gh.orgsFail": "No se pudieron listar tus organizaciones: {msg}",
   "gh.ownerFail": "No se pudieron listar los repos de {owner}: {msg}",
@@ -493,6 +495,7 @@ const fr: Dict = {
   "det.sent": "✓ Revue envoyée.",
 
   "gh.invalidToken": "Jeton invalide ou expiré.",
+  "gh.rateLimit": "Limite de requêtes GitHub atteinte pour ce jeton. Réessayez dans environ {mins} min.",
   "gh.noAccessHint": " (le jeton a-t-il accès à ce dépôt et la permission Pull requests ?)",
   "gh.orgsFail": "Impossible de lister vos organisations : {msg}",
   "gh.ownerFail": "Impossible de lister les dépôts de {owner} : {msg}",
@@ -654,6 +657,7 @@ const pt: Dict = {
   "det.sent": "✓ Revisão enviada.",
 
   "gh.invalidToken": "Token inválido ou expirado.",
+  "gh.rateLimit": "Limite de requisições do GitHub atingido para este token. Tente novamente em cerca de {mins} min.",
   "gh.noAccessHint": " (o token tem acesso a esse repositório e permissão de Pull requests?)",
   "gh.orgsFail": "Não foi possível listar suas organizações: {msg}",
   "gh.ownerFail": "Não foi possível listar os repos de {owner}: {msg}",

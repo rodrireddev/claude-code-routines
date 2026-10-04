@@ -44,7 +44,15 @@ export class ChatSettings extends HTMLElement {
     this.#drawer = root.querySelector("sl-drawer") as SlDrawer;
   }
 
+  /** Detaches store/window listeners when the element is discarded (e.g. UI rebuilt after a language change). */
+  #off = new AbortController();
+
+  disconnectedCallback(): void {
+    this.#off.abort();
+  }
+
   connectedCallback(): void {
+    this.#off = new AbortController();
     const root = this.shadowRoot!;
     this.#title.addEventListener("input", () => store.updateMeta(store.activeId, { title: this.#title.value }));
     this.#triggerId.addEventListener("input", () => store.updateMeta(store.activeId, { triggerId: this.#triggerId.value.trim() }));
@@ -52,12 +60,12 @@ export class ChatSettings extends HTMLElement {
     root.querySelector("sl-button[slot=footer]")!.addEventListener("click", () => this.#drawer.hide());
     root.getElementById("lang")!.addEventListener("sl-change", (e) =>
       setLang((e.target as HTMLElement & { value: string }).value as Lang));
-    store.addEventListener("security", () => this.#renderSecurity());
+    store.addEventListener("security", () => this.#renderSecurity(), { signal: this.#off.signal });
     this.#renderSecurity();
     store.addEventListener("change", (e) => {
       const kind = (e as CustomEvent).detail;
       if (kind === "active" || kind === "list") this.#sync();
-    });
+    }, { signal: this.#off.signal });
     this.#sync();
     void customElements.whenDefined("sl-drawer").then(() => this.#autoOpen());
   }

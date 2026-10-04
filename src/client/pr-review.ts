@@ -81,9 +81,17 @@ export class PrReview extends HTMLElement {
       <div id="view"></div>`;
   }
 
+  /** Removes store listeners when the view is discarded (e.g. rebuilt after a language change). */
+  #listeners = new AbortController();
+
   connectedCallback(): void {
-    store.addEventListener("github", () => void this.#render());
+    this.#listeners = new AbortController();
+    store.addEventListener("github", () => void this.#render(), { signal: this.#listeners.signal });
     void this.#render();
+  }
+
+  disconnectedCallback(): void {
+    this.#listeners.abort();
   }
 
   get #view(): HTMLElement {
@@ -181,7 +189,10 @@ export class PrReview extends HTMLElement {
       d.addEventListener("sl-after-hide", () => d.remove());
       (d as unknown as { show(): void }).show();
     });
-    refresh.addEventListener("click", () => this.#repo && void this.#loadPulls(this.#repo));
+    refresh.addEventListener("click", () => {
+      gh.clearCache();
+      if (this.#repo) void this.#loadPulls(this.#repo);
+    });
     select.addEventListener("sl-change", () => {
       const v = select.value as string;
       this.#repo = v;

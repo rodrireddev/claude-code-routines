@@ -31,7 +31,43 @@ export class GhError extends Error {
   }
 }
 
+/**
+ * Short-lived cache for GET requests. Rebuilding a view (switching language, reopening Pull requests)
+ * repeats the same calls; GitHub's search API only allows 30 requests per minute, so identical
+ * requests within the TTL share one response (concurrent ones share the same in-flight promise).
+ */
+const CACHE_TTL_MS = 60_000;
+const cache = new Map<string, { at: number; value: Promise<unknown> }>();
+
+/** Drops cached responses (used by "Refresh" and after any write). */
+export function clearCache(): void {
+  cache.clear();
+}
+
 async function gh<T>(token: string, path: string, init: RequestInit = {}): Promise<T> {
+  const isGet = !init.method || init.method === "GET";
+  if (!isGet) {
+    clearCache();
+    return request<T>(token, path, init);
+  }
+  const key = `${token}\n${path}`;
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.value as Promise<T>;
+  const value = request<T>(token, path, init);
+  cache.set(key, { at: Date.now(), value });
+  value.catch(() => cache.delete(key)); // never cache failures
+  return value;
+}
+
+/** Seconds until GitHub lifts a rate limit, from its response headers. */
+function retryAfter(res: Response): number {
+  const after = Number(res.headers.get("retry-after"));
+  if (after > 0) return after;
+  const reset = Number(res.headers.get("x-ratelimit-reset"));
+  return reset > 0 ? Math.max(1, Math.ceil(reset - Date.now() / 1000)) : 60;
+}
+
+async function request<T>(token: string, path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(API + path, {
     ...init,
     headers: {
@@ -48,7 +84,10 @@ async function gh<T>(token: string, path: string, init: RequestInit = {}): Promi
       msg = j.message ?? msg;
       if (j.errors?.length) msg += ` ${JSON.stringify(j.errors)}`;
     } catch { /* sin cuerpo */ }
+    const rateLimited = (res.status === 403 || res.status === 429)
+      && (res.headers.get("x-ratelimit-remaining") === "0" || /rate limit/i.test(msg));
     if (res.status === 401) msg = tr("gh.invalidToken");
+    else if (rateLimited) msg = tr("gh.rateLimit", { mins: Math.ceil(retryAfter(res) / 60) });
     else if (res.status === 403 || res.status === 404) msg += tr("gh.noAccessHint");
     throw new GhError(res.status, msg);
   }
