@@ -1,3 +1,5 @@
+import type { Key } from "./i18n.js";
+
 export interface FireData {
   claude_code_session_id?: string;
   claude_code_session_url?: string;
@@ -6,6 +8,8 @@ export interface FireData {
 }
 
 export interface FireResponse {
+  /** Error code from the local server (translated on the client). */
+  code?: string;
   ok?: boolean;
   status?: number;
   data?: FireData;
@@ -23,6 +27,8 @@ export interface Message {
   role: "user" | "bot";
   text: string;
   variant?: "pending" | "error";
+  /** Translation key: when set, the text is rendered in the current UI language. */
+  key?: Key;
   sessionId?: string;
   sessionUrl?: string;
   at: number;

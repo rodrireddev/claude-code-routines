@@ -2,9 +2,22 @@ import "./chat-message.js";
 import "./chat-settings.js";
 import "./conversation-list.js";
 import "./pr-review.js";
+import { t, type Key } from "./i18n.js";
 import { store } from "./store.js";
 import type { ChatMessage } from "./chat-message.js";
 import type { FireResponse, Message, SlButton, SlTextarea } from "./types.js";
+
+/** Messages saved by older versions stored Spanish text instead of a translation key. */
+const LEGACY: Record<string, Key> = {
+  "Ejecutando routine…": "msg.running",
+  "Routine lanzada correctamente.": "msg.fired",
+  "Interrumpido: no se recibió respuesta.": "msg.interrupted",
+};
+
+const messageText = (m: Message): string => {
+  const key = m.key ?? LEGACY[m.text];
+  return key ? t(key) : m.text;
+};
 
 /** <routine-chat> — aplicación completa: lista de conversaciones + chat de la activa. */
 export class RoutineChat extends HTMLElement {
@@ -54,20 +67,20 @@ export class RoutineChat extends HTMLElement {
         <header>
           <div id="title"></div>
           <div class="actions">
-            <sl-icon-button id="lock" name="lock" label="Bloquear" hidden></sl-icon-button>
-            <sl-icon-button id="gear" name="gear" label="Configuración"></sl-icon-button>
+            <sl-icon-button id="lock" name="lock" label="${t("chat.lock")}" hidden></sl-icon-button>
+            <sl-icon-button id="gear" name="gear" label="${t("chat.settings")}"></sl-icon-button>
           </div>
         </header>
         <div id="scroll">
-          <div class="empty"><img class="logo" src="/assets/logo-128.png" alt="" width="72" height="72" /><h2>¿Qué routine quieres ejecutar?</h2><div>Escribe un mensaje y se enviará como texto a tu routine.</div></div>
+          <div class="empty"><img class="logo" src="/assets/logo-128.png" alt="" width="72" height="72" /><h2>${t("chat.emptyTitle")}</h2><div>${t("chat.emptyText")}</div></div>
           <div id="messages"></div>
         </div>
         <div class="composer-wrap">
           <div class="composer">
-            <sl-textarea rows="1" resize="auto" placeholder="Escribe un mensaje para la routine…"></sl-textarea>
-            <sl-button class="send" variant="primary" circle label="Enviar"><sl-icon name="arrow-up" label="Enviar"></sl-icon></sl-button>
+            <sl-textarea rows="1" resize="auto" placeholder="${t("chat.placeholder")}"></sl-textarea>
+            <sl-button class="send" variant="primary" circle label="${t("chat.send")}"><sl-icon name="arrow-up" label="${t("chat.send")}"></sl-icon></sl-button>
           </div>
-          <div class="hint">Enter envía · Shift+Enter nueva línea</div>
+          <div class="hint">${t("chat.hint")}</div>
         </div>
         <pr-review></pr-review>
         <chat-settings></chat-settings>
@@ -94,6 +107,8 @@ export class RoutineChat extends HTMLElement {
     };
     list.addEventListener("open-prs", () => setView(true));
     list.addEventListener("open-chat", () => setView(false));
+    // A new conversation starts empty: open its settings so the trigger and token can be filled in.
+    list.addEventListener("new-conversation", () => this.#settings.show());
     store.addEventListener("change", (e) => {
       if ((e as CustomEvent).detail === "active") setView(false);
     });
@@ -119,8 +134,8 @@ export class RoutineChat extends HTMLElement {
 
   #renderTitle(): void {
     this.#title.textContent = this.classList.contains("view-prs")
-      ? "Pull requests"
-      : store.active.title || "Nueva conversación";
+      ? t("chat.prTitle")
+      : store.active.title || t("chat.newConversation");
   }
 
   #updateBusy(): void {
@@ -137,14 +152,14 @@ export class RoutineChat extends HTMLElement {
     const el = document.createElement("chat-message") as ChatMessage;
     el.setAttribute("role", m.role);
     if (m.variant) el.setAttribute("variant", m.variant);
-    el.append(m.text);
+    el.append(messageText(m));
     if (m.sessionUrl) {
       const meta = document.createElement("small");
       const a = document.createElement("a");
       a.href = m.sessionUrl;
       a.target = "_blank";
       a.rel = "noopener noreferrer";
-      a.textContent = "Ver sesión y respuesta";
+      a.textContent = t("msg.viewSession");
       meta.append(a, m.sessionId ? ` · ${m.sessionId}` : "");
       el.append(meta);
     }
@@ -157,7 +172,7 @@ export class RoutineChat extends HTMLElement {
     if (!text || this.#busy.has(convo.id)) return;
     this.#input.value = "";
     store.addMessage(convo.id, { role: "user", text });
-    const pending = store.addMessage(convo.id, { role: "bot", text: "Ejecutando routine…", variant: "pending" });
+    const pending = store.addMessage(convo.id, { role: "bot", text: "", key: "msg.running", variant: "pending" });
     this.#busy.add(convo.id);
     this.#updateBusy();
     let result: Partial<Message>;
@@ -169,7 +184,7 @@ export class RoutineChat extends HTMLElement {
       });
       result = this.#toMessage((await r.json()) as FireResponse);
     } catch (err) {
-      result = { text: `Error de red: ${(err as Error).message}`, variant: "error" };
+      result = { text: t("msg.networkError", { msg: (err as Error).message }), variant: "error" };
     }
     this.#busy.delete(convo.id);
     store.updateMessage(convo.id, pending.id, result);
@@ -178,6 +193,7 @@ export class RoutineChat extends HTMLElement {
   }
 
   #toMessage(res: FireResponse): Partial<Message> {
+    if (res.code) return { variant: "error", text: t(`server.${res.code}` as Key, { msg: res.error ?? "" }) };
     if (res.error || !res.ok) {
       return {
         variant: "error",
@@ -186,8 +202,8 @@ export class RoutineChat extends HTMLElement {
     }
     const { claude_code_session_url: url, claude_code_session_id: id } = res.data ?? {};
     return url
-      ? { text: "Routine lanzada correctamente.", sessionUrl: url, sessionId: id }
-      : { text: `Routine lanzada correctamente. ${JSON.stringify(res.data)}` };
+      ? { text: "", key: "msg.fired", sessionUrl: url, sessionId: id }
+      : { text: `${t("msg.fired")} ${JSON.stringify(res.data)}` };
   }
 }
 

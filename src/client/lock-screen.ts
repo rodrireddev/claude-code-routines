@@ -1,3 +1,4 @@
+import { t, type Key } from "./i18n.js";
 import { store } from "./store.js";
 import type { SlButton, SlInput } from "./types.js";
 
@@ -21,12 +22,12 @@ export class LockScreen extends HTMLElement {
       </style>
       <div class="card">
         <img class="logo" src="/assets/logo-128.png" alt="" width="72" height="72" />
-        <h2>Datos cifrados</h2>
-        <p>Introduce tu contraseña para abrir tus conversaciones.</p>
-        <sl-input type="password" placeholder="Contraseña" password-toggle autocomplete="current-password"></sl-input>
+        <h2>${t("lock.title")}</h2>
+        <p>${t("lock.text")}</p>
+        <sl-input type="password" placeholder="${t("lock.placeholder")}" password-toggle autocomplete="current-password"></sl-input>
         <div class="err"></div>
-        <sl-button variant="primary" size="large">Desbloquear</sl-button>
-        <sl-button class="link" variant="text" size="small">Olvidé mi contraseña (borrar todo)</sl-button>
+        <sl-button variant="primary" size="large">${t("lock.unlock")}</sl-button>
+        <sl-button class="link" variant="text" size="small">${t("lock.forgot")}</sl-button>
       </div>`;
     const root = this.shadowRoot!;
     this.#pass = root.querySelector("sl-input") as SlInput;
@@ -40,7 +41,7 @@ export class LockScreen extends HTMLElement {
       if ((e as KeyboardEvent).key === "Enter") void this.#unlock();
     });
     this.shadowRoot!.querySelector(".link")!.addEventListener("click", () => {
-      if (confirm("Se borrarán TODAS las conversaciones y tokens guardados. ¿Continuar?")) store.reset();
+      if (confirm(t("lock.confirmReset"))) store.reset();
     });
     void this.#focus();
   }
@@ -60,7 +61,7 @@ export class LockScreen extends HTMLElement {
       await store.unlock(this.#pass.value);
       this.dispatchEvent(new Event("unlocked"));
     } catch (err) {
-      this.#err.textContent = (err as Error).message;
+      this.#err.textContent = t((err as Error).message as Key);
       this.#pass.value = "";
       void this.#focus();
     } finally {

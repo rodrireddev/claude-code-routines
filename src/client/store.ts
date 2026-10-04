@@ -80,7 +80,8 @@ class Store extends EventTarget {
       for (const m of c.messages) {
         if (m.variant === "pending") {
           m.variant = "error";
-          m.text = "Interrumpido: no se recibió respuesta.";
+          m.text = "";
+          m.key = "msg.interrupted";
         }
       }
     }
@@ -124,13 +125,13 @@ class Store extends EventTarget {
   /** Descifra el vault con la contraseña. Lanza si es incorrecta. */
   async unlock(passphrase: string): Promise<void> {
     const vault = read<Vault | null>(VAULT_KEY, null);
-    if (!vault) throw new Error("No hay datos cifrados");
+    if (!vault) throw new Error("lock.noData");
     const key = await deriveKey(passphrase, vault.salt, vault.iter);
     let payload: Payload;
     try {
       payload = parsePayload(JSON.parse(await decrypt(key, vault)));
     } catch {
-      throw new Error("Contraseña incorrecta");
+      throw new Error("lock.wrong");
     }
     this.#key = key;
     this.#salt = vault.salt;
@@ -200,9 +201,6 @@ class Store extends EventTarget {
 
   create(): Conversation {
     const c = this.#blank();
-    // Hereda la configuración de la conversación activa para no reescribirla.
-    c.triggerId = this.active.triggerId;
-    c.token = this.active.token;
     this.conversations.unshift(c);
     this.activeId = c.id;
     this.#emit("list");
@@ -246,6 +244,7 @@ class Store extends EventTarget {
     const m = this.get(id)?.messages.find((x) => x.id === msgId);
     if (!m) return;
     if (!("variant" in patch)) delete m.variant;
+    if (!("key" in patch)) delete m.key;
     Object.assign(m, patch);
     this.#emit("messages");
   }

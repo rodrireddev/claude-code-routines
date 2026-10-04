@@ -1,3 +1,5 @@
+import { t as tr } from "./i18n.js";
+
 /** Cliente mínimo de la API REST de GitHub (fine-grained PAT). Se llama directo desde el cliente. */
 
 const API = "https://api.github.com";
@@ -46,8 +48,8 @@ async function gh<T>(token: string, path: string, init: RequestInit = {}): Promi
       msg = j.message ?? msg;
       if (j.errors?.length) msg += ` ${JSON.stringify(j.errors)}`;
     } catch { /* sin cuerpo */ }
-    if (res.status === 401) msg = "Token inválido o expirado.";
-    else if (res.status === 403 || res.status === 404) msg += " (¿el token tiene acceso a ese repositorio y permiso de Pull requests?)";
+    if (res.status === 401) msg = tr("gh.invalidToken");
+    else if (res.status === 403 || res.status === 404) msg += tr("gh.noAccessHint");
     throw new GhError(res.status, msg);
   }
   return (await res.json()) as T;
@@ -104,13 +106,13 @@ export async function discoverRepos(t: string, extraOwners: string[], login = ""
   try {
     orgs = (await gh<{ login: string }[]>(t, "/user/orgs?per_page=100")).map((o) => o.login);
   } catch (e) {
-    warnings.push(`No se pudieron listar tus organizaciones: ${(e as Error).message}`);
+    warnings.push(tr("gh.orgsFail", { msg: (e as Error).message }));
   }
   const owners = [...new Set([...orgs, ...extraOwners])];
   const results = await Promise.allSettled(owners.map((o) => listOwnerRepos(t, o)));
   results.forEach((r, i) => {
     if (r.status === "fulfilled") add(r.value);
-    else warnings.push(`No se pudieron listar los repos de ${owners[i]}: ${(r.reason as Error).message}`);
+    else warnings.push(tr("gh.ownerFail", { owner: owners[i], msg: (r.reason as Error).message }));
   });
 
   // Búsqueda de PRs abiertos: respeta el acceso del token, así que también revela repos privados
@@ -122,7 +124,7 @@ export async function discoverRepos(t: string, extraOwners: string[], login = ""
     const fetched = await Promise.allSettled(missing.map((n) => getRepo(t, n)));
     fetched.forEach((r) => { if (r.status === "fulfilled") map.set(r.value.full_name, r.value); });
   } catch (e) {
-    warnings.push(`La búsqueda de PRs falló: ${(e as Error).message}`);
+    warnings.push(tr("gh.searchFail", { msg: (e as Error).message }));
   }
   return { repos: [...map.values()], warnings, orgs };
 }

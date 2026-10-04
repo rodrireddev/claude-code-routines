@@ -30,7 +30,7 @@ async function readBody(req: IncomingMessage): Promise<string> {
   let size = 0;
   for await (const chunk of req) {
     size += (chunk as Buffer).length;
-    if (size > 1_000_000) throw new Error("Body demasiado grande");
+    if (size > 1_000_000) throw new Error("Body too large");
     chunks.push(chunk as Buffer);
   }
   return Buffer.concat(chunks).toString("utf8");
@@ -46,14 +46,14 @@ async function fireRoutine(req: IncomingMessage, res: ServerResponse): Promise<v
     if (typeof body.triggerId === "string" && body.triggerId.trim()) triggerId = body.triggerId.trim();
     if (typeof body.token === "string" && body.token.trim()) token = body.token.trim();
   } catch {
-    return sendJson(res, 400, { error: "JSON inválido" });
+    return sendJson(res, 400, { error: "Invalid JSON", code: "invalid_json" });
   }
   if (typeof text !== "string" || !text.trim()) {
-    return sendJson(res, 400, { error: "El campo 'text' es obligatorio" });
+    return sendJson(res, 400, { error: "The 'text' field is required", code: "missing_text" });
   }
 
   if (!triggerId || !token) {
-    return sendJson(res, 400, { error: "Configura el Trigger ID y el Token (⚙ Configuración)." });
+    return sendJson(res, 400, { error: "Trigger ID and token are required", code: "missing_config" });
   }
 
   try {
@@ -79,7 +79,7 @@ async function fireRoutine(req: IncomingMessage, res: ServerResponse): Promise<v
     }
     sendJson(res, upstream.status, { ok: upstream.ok, status: upstream.status, data });
   } catch (err) {
-    sendJson(res, 502, { error: `No se pudo contactar con la API: ${(err as Error).message}` });
+    sendJson(res, 502, { error: (err as Error).message, code: "upstream" });
   }
 }
 

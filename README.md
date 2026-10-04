@@ -38,6 +38,7 @@ Everything runs **on your machine**. Your tokens never touch a third-party serve
 | 🔐 **Optional encryption** | Lock your data with a passphrase: PBKDF2-SHA256 + AES-256-GCM via WebCrypto. |
 | 🔍 **Pull request review** | See all your open PRs, read descriptions and diffs, then **Approve**, **Request changes** or **Comment**. |
 | 🌗 **Light / dark / system theme** | One-click theme toggle, remembered between sessions. |
+| 🌍 **4 languages** | English (default), Español, Français and Português, switchable at any time. |
 | 🖥️ **Desktop app** | Ships as an Electron app, or runs in any browser on `localhost`. |
 | 🧩 **Zero-framework frontend** | Native Web Components written in TypeScript, styled with [Shoelace](https://shoelace.style). |
 
@@ -73,7 +74,8 @@ Then:
 
 1. Click **⚙** (top right) and enter a **name**, the routine **Trigger ID** (`trig_…`) and its **token**.
 2. Type a message and press **Enter**. The routine fires and you get a link to the Claude Code session it started.
-3. Click **New conversation** to add another routine, each with its own credentials.
+3. Click **New conversation** to add another routine. Each conversation starts empty and has its own credentials.
+4. Change the language with the translate button at the bottom of the sidebar (or in **⚙ → Application**).
 
 ## How it works
 
@@ -161,7 +163,8 @@ src/
     ├── store.ts            # Local persistence (plain or encrypted)
     ├── crypto.ts           # PBKDF2 + AES-GCM helpers
     ├── github.ts           # Minimal GitHub REST client
-    └── theme.ts            # Light / dark / system theme
+    ├── theme.ts            # Light / dark / system theme
+    └── i18n.ts             # UI translations (en, es, fr, pt)
 public/                     # index.html, assets, compiled client JS
 docs/screenshots/           # README images
 ```
@@ -176,7 +179,6 @@ docs/screenshots/           # README images
 
 ## Roadmap & known limitations
 
-- [ ] English UI / i18n (the interface is currently in Spanish)
 - [ ] Show the routine's final output in the chat (the fire endpoint only returns the session link)
 - [ ] Packaged desktop installers (Windows / macOS / Linux)
 - [ ] Inline review comments on specific diff lines

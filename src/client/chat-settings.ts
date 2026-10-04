@@ -1,3 +1,4 @@
+import { getLang, LANGUAGES, setLang, t, type Lang } from "./i18n.js";
 import { store } from "./store.js";
 import type { SlDrawer, SlInput } from "./types.js";
 
@@ -18,16 +19,23 @@ export class ChatSettings extends HTMLElement {
         .row { display:flex; gap:var(--sl-spacing-small); flex-wrap:wrap; }
         .err { color:var(--sl-color-danger-600); font-size:var(--sl-font-size-small); min-height:1em; }
       </style>
-      <sl-drawer label="Configuración de la conversación" placement="end">
+      <sl-drawer label="${t("set.title")}" placement="end">
         <div class="fields">
-          <sl-input id="title" label="Nombre" placeholder="Sin título" autocomplete="off"></sl-input>
+          <sl-input id="title" label="${t("set.name")}" placeholder="${t("side.untitled")}" autocomplete="off"></sl-input>
           <sl-input id="triggerId" label="Trigger ID" placeholder="trig_..." autocomplete="off" clearable></sl-input>
           <sl-input id="token" label="Token" type="password" placeholder="sk-ant-oat01-..." autocomplete="off" password-toggle></sl-input>
-          <small>Cada conversación tiene su propio Trigger ID y Token. Se guardan solo en este equipo.</small>
+          <small>${t("set.note")}</small>
         </div>
         <sl-divider></sl-divider>
         <div class="fields" id="security"></div>
-        <sl-button slot="footer" variant="primary">Listo</sl-button>
+        <sl-divider></sl-divider>
+        <div class="fields">
+          <h3>${t("set.app")}</h3>
+          <sl-select id="lang" label="${t("set.language")}" value="${getLang()}" hoist>
+            ${LANGUAGES.map((l) => `<sl-option value="${l.code}">${l.name}</sl-option>`).join("")}
+          </sl-select>
+        </div>
+        <sl-button slot="footer" variant="primary">${t("set.done")}</sl-button>
       </sl-drawer>`;
     const root = this.shadowRoot!;
     this.#title = root.getElementById("title") as SlInput;
@@ -41,7 +49,9 @@ export class ChatSettings extends HTMLElement {
     this.#title.addEventListener("input", () => store.updateMeta(store.activeId, { title: this.#title.value }));
     this.#triggerId.addEventListener("input", () => store.updateMeta(store.activeId, { triggerId: this.#triggerId.value.trim() }));
     this.#token.addEventListener("input", () => store.updateMeta(store.activeId, { token: this.#token.value.trim() }));
-    root.querySelector("sl-button")!.addEventListener("click", () => this.#drawer.hide());
+    root.querySelector("sl-button[slot=footer]")!.addEventListener("click", () => this.#drawer.hide());
+    root.getElementById("lang")!.addEventListener("sl-change", (e) =>
+      setLang((e.target as HTMLElement & { value: string }).value as Lang));
     store.addEventListener("security", () => this.#renderSecurity());
     this.#renderSecurity();
     store.addEventListener("change", (e) => {
@@ -57,30 +67,30 @@ export class ChatSettings extends HTMLElement {
     const box = this.shadowRoot!.getElementById("security")!;
     if (store.encrypted) {
       box.innerHTML = `
-        <h3>🔒 Seguridad</h3>
-        <small>Los datos locales están cifrados (AES-256-GCM). Se pedirá la contraseña al abrir la app.</small>
-        <div class="row"><sl-button id="lock">Bloquear ahora</sl-button><sl-button id="off" variant="danger" outline>Quitar cifrado</sl-button></div>`;
+        <h3>🔒 ${t("sec.title")}</h3>
+        <small>${t("sec.encrypted")}</small>
+        <div class="row"><sl-button id="lock">${t("sec.lockNow")}</sl-button><sl-button id="off" variant="danger" outline>${t("sec.disable")}</sl-button></div>`;
       box.querySelector("#lock")!.addEventListener("click", () => void store.lock());
       box.querySelector("#off")!.addEventListener("click", () => {
-        if (confirm("¿Quitar el cifrado? Los datos volverán a guardarse en claro.")) void store.disableEncryption();
+        if (confirm(t("sec.confirmDisable"))) void store.disableEncryption();
       });
       return;
     }
     box.innerHTML = `
-      <h3>Seguridad</h3>
-      <small>Ahora mismo las conversaciones y los tokens se guardan <b>en claro</b> en este equipo. Protégelos con una contraseña.</small>
-      <sl-input id="p1" type="password" label="Contraseña (mín. 8 caracteres)" password-toggle autocomplete="new-password"></sl-input>
-      <sl-input id="p2" type="password" label="Repite la contraseña" password-toggle autocomplete="new-password"></sl-input>
+      <h3>${t("sec.title")}</h3>
+      <small>${t("sec.plain")}</small>
+      <sl-input id="p1" type="password" label="${t("sec.pass")}" password-toggle autocomplete="new-password"></sl-input>
+      <sl-input id="p2" type="password" label="${t("sec.pass2")}" password-toggle autocomplete="new-password"></sl-input>
       <div class="err" id="err"></div>
-      <sl-button id="on" variant="primary">Cifrar datos</sl-button>
-      <small>Si la olvidas no hay forma de recuperar los datos cifrados.</small>`;
+      <sl-button id="on" variant="primary">${t("sec.encrypt")}</sl-button>
+      <small>${t("sec.noRecovery")}</small>`;
     const p1 = box.querySelector("#p1") as SlInput;
     const p2 = box.querySelector("#p2") as SlInput;
     const err = box.querySelector("#err") as HTMLElement;
     const btn = box.querySelector("#on") as HTMLElement & { loading: boolean };
     btn.addEventListener("click", async () => {
-      if (p1.value.length < 8) return void (err.textContent = "La contraseña debe tener al menos 8 caracteres.");
-      if (p1.value !== p2.value) return void (err.textContent = "Las contraseñas no coinciden.");
+      if (p1.value.length < 8) return void (err.textContent = t("sec.tooShort"));
+      if (p1.value !== p2.value) return void (err.textContent = t("sec.mismatch"));
       btn.loading = true;
       await store.enableEncryption(p1.value);
     });

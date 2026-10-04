@@ -29,6 +29,7 @@ See the [README](README.md#project-structure) for a file-by-file overview.
 - **Treat external data as untrusted.** Content from GitHub or the API must be rendered with `textContent` / DOM APIs, never `innerHTML`.
 - **Never log or transmit tokens** anywhere other than the API they belong to (`api.anthropic.com` for routine tokens, `api.github.com` for GitHub tokens).
 - **Match the surrounding code:** small focused modules, the same naming and comment style.
+- **Translations:** UI strings live in `src/client/i18n.ts`. English is the source of truth: the build fails if another language is missing a key. To add a language, add a dictionary and an entry in `LANGUAGES`.
 - **Screenshots:** if you change the UI, consider updating the images in `docs/screenshots/`.
 
 ## Pull requests
