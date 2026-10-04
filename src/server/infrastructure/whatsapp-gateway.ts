@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { create, type Message, type Whatsapp } from "@wppconnect-team/wppconnect";
 import puppeteer, { type Browser, type LaunchOptions } from "puppeteer";
 import type { ChatGateway, IncomingMessage } from "../bot/ports.js";
+import { classifyMessage, type RawMessage } from "./own-chat.js";
 
 export type WhatsAppStatus = "disabled" | "disconnected" | "connecting" | "qr" | "connected";
 
@@ -35,19 +36,6 @@ const MAX_ACTIVITY = 60;
 
 const MAX_TRACKED_IDS = 500;
 const POLL_INTERVAL_MS = 3000;
-
-/** A message as the gateway sees it, whatever WhatsApp Web object it came from. */
-interface RawMessage {
-  id: string;
-  fromMe: boolean;
-  type: string;
-  body: string;
-  to: string;
-  from: string;
-  /** Unix time in seconds (0 if unknown). */
-  t: number;
-  source?: "event" | "store" | "poll";
-}
 
 /** Shape of WhatsApp Web's internal message model (only the fields we read, inside the page). */
 interface RawMsgModel {
@@ -265,8 +253,9 @@ export class WhatsAppGateway implements ChatGateway {
    */
   async #dispatch(client: Whatsapp, message: RawMessage): Promise<void> {
     if (!message.id || this.#processed.has(message.id)) return;
-    // Not-yet-decrypted messages ("ciphertext") come back later as "chat": only mark final ones.
-    if (message.type === "chat") this.#processed.add(message.id);
+    // Messages still being decrypted ("ciphertext", or "chat" with no body yet) come back later
+    // with their final content: only mark complete text messages as processed.
+    if (message.type === "chat" && message.body.trim()) this.#processed.add(message.id);
     if (this.#processed.size > MAX_TRACKED_IDS * 2) this.#processed.delete(this.#processed.values().next().value!);
     try {
       const incoming = await this.#toIncoming(client, message);
@@ -280,23 +269,19 @@ export class WhatsAppGateway implements ChatGateway {
 
   /** Keeps only text messages the owner wrote in their own chat, excluding the bot's replies. */
   async #toIncoming(client: Whatsapp, message: RawMessage): Promise<IncomingMessage | null> {
-    const body = message.body.trim();
-    // Every message that looks like a command is logged with the reason it is (not) handled,
-    // so problems can be diagnosed from the server console.
-    const skip = (reason: string): null => {
-      if (body.startsWith("/") || this.#ownIds.has(message.to)) {
-        this.#log("ignored", `"${body.slice(0, 30)}" (via ${message.source}, from ${message.from} to ${message.to}, type ${message.type}): ${reason}`);
-      }
-      return null;
-    };
-    if (!message.fromMe) return skip("not written by you");
-    if (this.#sentIds.has(message.id) || body.startsWith("🤖")) return null; // the bot's own replies
-    if (!body) return null;
-    if (message.type !== "chat") return skip("not a text message");
-    if (message.t && message.t < this.#connectedAt) return null; // history from before connecting
-    if (!(await this.#isOwnChat(client, message.to, message.from))) return skip("not your own chat");
-    return { chatId: message.to, text: body };
+    const ctx = { ownIds: this.#ownIds, sentIds: this.#sentIds, connectedAt: this.#connectedAt };
+    let result = classifyMessage(message, ctx);
+    // A chat ID we don't know yet: ask WhatsApp whether that contact is the account itself.
+    if (!result.accept && result.unknownChat && (await this.#isMe(client, message.chat || message.to))) {
+      result = classifyMessage(message, ctx);
+    }
+    if (result.accept) return { chatId: result.chatId, text: result.text };
+    if (result.log) {
+      this.#log("ignored", `"${message.body.trim().slice(0, 30)}" (via ${message.source}, chat ${message.chat}, from ${message.from} to ${message.to}, type ${message.type}): ${result.reason}`);
+    }
+    return null;
   }
+
 
   /**
    * WPPConnect's onAnyMessage only fires for messages WhatsApp Web flags as "new", and messages
@@ -307,28 +292,45 @@ export class WhatsAppGateway implements ChatGateway {
     const page = client.page;
     try {
       await page.exposeFunction("routineChatMessage", (m: RawMessage) => void this.#dispatch(client, { ...m, source: "store" }));
-      await page.evaluate(() => {
+    } catch (e) {
+      this.#log("error", `could not expose the message callback: ${(e as Error).message}`);
+    }
+    await this.#attachStoreListener(client);
+    // A reload of WhatsApp Web drops listeners installed in the page: install it again.
+    page.on("load", () => void this.#attachStoreListener(client));
+
+    this.#pollTimer = setInterval(() => void this.#pollOwnChat(client), POLL_INTERVAL_MS);
+  }
+
+  async #attachStoreListener(client: Whatsapp): Promise<void> {
+    try {
+      // Waits until WA-JS is injected again after a reload.
+      await client.page.waitForFunction(() => !!(globalThis as unknown as { WPP?: { whatsapp?: { MsgStore?: unknown } } }).WPP?.whatsapp?.MsgStore, { timeout: 60_000 });
+      await client.page.evaluate((ownIds: string[]) => {
         const w = globalThis as unknown as {
           WPP: { whatsapp: { MsgStore: { on(event: string, cb: (msg: RawMsgModel) => void): void } } };
           routineChatMessage(m: unknown): void;
         };
+        const own = new Set(ownIds);
         const send = (msg: RawMsgModel): void => {
-          if (!msg?.id?.fromMe) return;
+          if (msg?.id?.fromMe !== true) return; // only a real boolean true is an outgoing message
+          // Only the own chat leaves the page (the store also changes for every ack in every chat).
+          const ids = [msg.id.remote?._serialized, msg.to?._serialized];
+          if (!ids.some((id) => id && own.has(id))) return;
           w.routineChatMessage({
             id: msg.id._serialized, fromMe: true, type: msg.type, body: msg.body ?? "",
-            to: msg.to?._serialized ?? msg.id.remote?._serialized ?? "", from: msg.from?._serialized ?? "", t: msg.t ?? 0,
+            chat: msg.id.remote?._serialized ?? "",
+            to: msg.to?._serialized ?? "", from: msg.from?._serialized ?? "", t: msg.t ?? 0,
           });
         };
         w.WPP.whatsapp.MsgStore.on("add", send);
-        // Encrypted messages are added first as "ciphertext" and become "chat" once decrypted.
-        w.WPP.whatsapp.MsgStore.on("change:type", send);
-      });
+        // Any change: encrypted messages arrive as "ciphertext" and get their type/body when decrypted.
+        w.WPP.whatsapp.MsgStore.on("change", send);
+      }, [...this.#ownIds]);
       this.#log("info", "listening to the message store");
     } catch (e) {
       this.#log("error", `could not attach the message-store listener: ${(e as Error).message}`);
     }
-
-    this.#pollTimer = setInterval(() => void this.#pollOwnChat(client), POLL_INTERVAL_MS);
   }
 
   async #pollOwnChat(client: Whatsapp): Promise<void> {
@@ -344,10 +346,11 @@ export class WhatsAppGateway implements ChatGateway {
             const msgs = await w.WPP.chat.getMessages(chatId, { count: 5 });
             notes.push(`${chatId}: ok`);
             for (const msg of msgs) {
-              if (!msg?.id?.fromMe) continue;
+              if (msg?.id?.fromMe !== true) continue;
               out.push({
                 id: msg.id._serialized, fromMe: true, type: msg.type, body: msg.body ?? "",
-                to: msg.to?._serialized ?? chatId, from: msg.from?._serialized ?? "", t: msg.t ?? 0,
+                chat: msg.id.remote?._serialized ?? chatId,
+                to: msg.to?._serialized ?? "", from: msg.from?._serialized ?? "", t: msg.t ?? 0,
               });
             }
           } catch (e) {
@@ -372,23 +375,20 @@ export class WhatsAppGateway implements ChatGateway {
     }
   }
 
-  /**
-   * "Message yourself" chat? Depending on the account it is addressed by phone ("…@c.us") or by
-   * LID ("…@lid"), so besides the known IDs we ask WhatsApp whether the contact is the account itself.
-   */
-  async #isOwnChat(client: Whatsapp, to: string, from: string): Promise<boolean> {
-    if (!to) return false;
-    if (to === from || this.#ownIds.has(to)) return true;
-    if (to.endsWith("@g.us") || to.endsWith("@broadcast") || to.endsWith("@newsletter")) return false;
+  /** Asks WhatsApp whether a chat ID is the account itself (remembered for next time). */
+  async #isMe(client: Whatsapp, chatId: string): Promise<boolean> {
+    if (!chatId) return false;
     try {
-      const contact = await client.getContact(to);
+      const contact = await client.getContact(chatId);
       if (contact?.isMe) {
-        this.#ownIds.add(to);
+        this.#ownIds.add(chatId);
+        this.#log("info", `${chatId} identified as your own chat`);
         return true;
       }
     } catch { /* unknown contact */ }
     return false;
   }
+
 
   #track(id: unknown): void {
     const key = serialize(id);
@@ -430,7 +430,8 @@ function fromWppMessage(message: Message): RawMessage {
     fromMe: !!message?.fromMe,
     type: message?.type ?? "",
     body: message?.body ?? (message as { content?: string })?.content ?? "",
-    to: serialize(message?.to) || serialize(message?.chatId),
+    chat: serialize(message?.chatId) || serialize(message?.to),
+    to: serialize(message?.to),
     from: serialize(message?.from),
     t: message?.t ?? 0,
     source: "event",
