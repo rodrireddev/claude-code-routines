@@ -1,6 +1,7 @@
-import { t as tr } from "./i18n.js";
-
-/** Cliente mínimo de la API REST de GitHub (fine-grained PAT). Se llama directo desde el cliente. */
+/**
+ * Minimal GitHub REST client shared by the browser UI and the server (WhatsApp bot).
+ * It only depends on `fetch`, so it runs unchanged in both environments.
+ */
 
 const API = "https://api.github.com";
 
@@ -25,15 +26,50 @@ export interface GhFile { filename: string; status: string; additions: number; d
 export interface GhReview { id: number; user: { login: string }; state: string; body: string; submitted_at?: string }
 export type ReviewEvent = "APPROVE" | "REQUEST_CHANGES" | "COMMENT";
 
+export interface OpenPull { repo: string; number: number; title: string; draft: boolean; author: string; updatedAt: string }
+
+/** Why a GitHub call failed, so each caller can phrase the error in its own language. */
+export type GhErrorKind = "auth" | "rate_limit" | "no_access" | "other";
+
+export interface GhErrorInfo {
+  status: number;
+  kind: GhErrorKind;
+  /** GitHub's own message. */
+  raw: string;
+  /** Seconds to wait before retrying (rate limits only). */
+  retryAfter: number;
+}
+
+/** Turns an error into user-facing text. Callers can replace it (the UI uses its translations). */
+export type ErrorFormatter = (info: GhErrorInfo) => string;
+
+const englishMessages: ErrorFormatter = (e) => {
+  if (e.kind === "auth") return "Invalid or expired token.";
+  if (e.kind === "rate_limit") return `GitHub rate limit reached for this token. Try again in about ${Math.ceil(e.retryAfter / 60)} min.`;
+  if (e.kind === "no_access") return `${e.raw} (does the token have access to that repository and Pull requests permission?)`;
+  return e.raw;
+};
+
+let formatError: ErrorFormatter = englishMessages;
+
+export function setErrorFormatter(fn: ErrorFormatter): void {
+  formatError = fn;
+}
+
 export class GhError extends Error {
-  constructor(public status: number, message: string) {
-    super(message);
+  readonly status: number;
+  readonly kind: GhErrorKind;
+
+  constructor(info: GhErrorInfo) {
+    super(formatError(info));
+    this.status = info.status;
+    this.kind = info.kind;
   }
 }
 
 /**
- * Short-lived cache for GET requests. Rebuilding a view (switching language, reopening Pull requests)
- * repeats the same calls; GitHub's search API only allows 30 requests per minute, so identical
+ * Short-lived cache for GET requests. Rebuilding a view or answering repeated chat commands
+ * issues the same calls; GitHub's search API only allows 30 requests per minute, so identical
  * requests within the TTL share one response (concurrent ones share the same in-flight promise).
  */
 const CACHE_TTL_MS = 60_000;
@@ -44,7 +80,7 @@ export function clearCache(): void {
   cache.clear();
 }
 
-async function gh<T>(token: string, path: string, init: RequestInit = {}): Promise<T> {
+function gh<T>(token: string, path: string, init: RequestInit = {}): Promise<T> {
   const isGet = !init.method || init.method === "GET";
   if (!isGet) {
     clearCache();
@@ -67,29 +103,31 @@ function retryAfter(res: Response): number {
   return reset > 0 ? Math.max(1, Math.ceil(reset - Date.now() / 1000)) : 60;
 }
 
+const headers = (token: string): Record<string, string> => ({
+  Authorization: `Bearer ${token}`,
+  Accept: "application/vnd.github+json",
+  "X-GitHub-Api-Version": "2022-11-28",
+});
+
 async function request<T>(token: string, path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(API + path, {
     ...init,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/vnd.github+json",
-      "X-GitHub-Api-Version": "2022-11-28",
-      ...(init.body ? { "Content-Type": "application/json" } : {}),
-    },
+    headers: { ...headers(token), ...(init.body ? { "Content-Type": "application/json" } : {}) },
   });
   if (!res.ok) {
-    let msg = res.statusText;
+    let raw = res.statusText;
     try {
       const j = (await res.json()) as { message?: string; errors?: unknown[] };
-      msg = j.message ?? msg;
-      if (j.errors?.length) msg += ` ${JSON.stringify(j.errors)}`;
-    } catch { /* sin cuerpo */ }
+      raw = j.message ?? raw;
+      if (j.errors?.length) raw += ` ${JSON.stringify(j.errors)}`;
+    } catch { /* no body */ }
     const rateLimited = (res.status === 403 || res.status === 429)
-      && (res.headers.get("x-ratelimit-remaining") === "0" || /rate limit/i.test(msg));
-    if (res.status === 401) msg = tr("gh.invalidToken");
-    else if (rateLimited) msg = tr("gh.rateLimit", { mins: Math.ceil(retryAfter(res) / 60) });
-    else if (res.status === 403 || res.status === 404) msg += tr("gh.noAccessHint");
-    throw new GhError(res.status, msg);
+      && (res.headers.get("x-ratelimit-remaining") === "0" || /rate limit/i.test(raw));
+    const kind: GhErrorKind = res.status === 401 ? "auth"
+      : rateLimited ? "rate_limit"
+      : res.status === 403 || res.status === 404 ? "no_access"
+      : "other";
+    throw new GhError({ status: res.status, kind, raw, retryAfter: rateLimited ? retryAfter(res) : 0 });
   }
   return (await res.json()) as T;
 }
@@ -97,8 +135,8 @@ async function request<T>(token: string, path: string, init: RequestInit = {}): 
 export const getUser = (t: string) => gh<{ login: string }>(t, "/user");
 
 /**
- * Repositorios que devuelve GitHub para el token. Ojo: un fine-grained token siempre puede leer
- * repos públicos, así que esta lista incluye públicos aunque no estén concedidos al token.
+ * Repositories GitHub returns for the token. A fine-grained token can always read public repos,
+ * so this list may include public repos that were not granted to it.
  */
 export async function listRepos(t: string): Promise<GhRepo[]> {
   const all: GhRepo[] = [];
@@ -110,7 +148,10 @@ export async function listRepos(t: string): Promise<GhRepo[]> {
   return all;
 }
 
-/** Repos de un dueño (organización o usuario) que el token puede ver. */
+export const listOrgs = async (t: string): Promise<string[]> =>
+  (await gh<{ login: string }[]>(t, "/user/orgs?per_page=100")).map((o) => o.login);
+
+/** Repos of an owner (organization or user) that the token can see. */
 export async function listOwnerRepos(t: string, owner: string): Promise<GhRepo[]> {
   const fetchAll = async (base: string): Promise<GhRepo[]> => {
     const all: GhRepo[] = [];
@@ -128,46 +169,6 @@ export async function listOwnerRepos(t: string, owner: string): Promise<GhRepo[]
   }
 }
 
-export interface RepoDiscovery { repos: GhRepo[]; warnings: string[]; orgs: string[] }
-
-/**
- * Junta todo lo que se puede descubrir: /user/repos, los repos de cada organización del usuario
- * y los dueños que el usuario añadió a mano. Los errores parciales se devuelven como avisos.
- */
-export async function discoverRepos(t: string, extraOwners: string[], login = ""): Promise<RepoDiscovery> {
-  const map = new Map<string, GhRepo>();
-  const warnings: string[] = [];
-  const add = (list: GhRepo[]): void => list.forEach((r) => map.set(r.full_name, r));
-
-  add(await listRepos(t));
-
-  let orgs: string[] = [];
-  try {
-    orgs = (await gh<{ login: string }[]>(t, "/user/orgs?per_page=100")).map((o) => o.login);
-  } catch (e) {
-    warnings.push(tr("gh.orgsFail", { msg: (e as Error).message }));
-  }
-  const owners = [...new Set([...orgs, ...extraOwners])];
-  const results = await Promise.allSettled(owners.map((o) => listOwnerRepos(t, o)));
-  results.forEach((r, i) => {
-    if (r.status === "fulfilled") add(r.value);
-    else warnings.push(tr("gh.ownerFail", { owner: owners[i], msg: (r.reason as Error).message }));
-  });
-
-  // Búsqueda de PRs abiertos: respeta el acceso del token, así que también revela repos privados
-  // (o de organizaciones) que /user/repos no lista.
-  try {
-    const known = new Set(map.keys());
-    const names = await searchPullRepos(t, [...new Set([login, ...extraOwners, ...orgs].filter(Boolean))], login);
-    const missing = names.filter((n) => !known.has(n)).slice(0, 100);
-    const fetched = await Promise.allSettled(missing.map((n) => getRepo(t, n)));
-    fetched.forEach((r) => { if (r.status === "fulfilled") map.set(r.value.full_name, r.value); });
-  } catch (e) {
-    warnings.push(tr("gh.searchFail", { msg: (e as Error).message }));
-  }
-  return { repos: [...map.values()], warnings, orgs };
-}
-
 interface SearchItem {
   repository_url: string;
   number: number;
@@ -177,12 +178,10 @@ interface SearchItem {
   updated_at: string;
 }
 
-export interface OpenPull { repo: string; number: number; title: string; draft: boolean; author: string; updatedAt: string }
-
-/** PRs abiertos visibles para el token: en repos de los dueños dados, donde participas o te piden review. */
+/** Open PRs visible to the token: in the given owners' repos, involving the user, or requesting their review. */
 export async function searchOpenPulls(t: string, owners: string[], login: string): Promise<OpenPull[]> {
   const queries = [
-    ...owners.filter(Boolean).map((o) => `is:pr is:open user:${o}`),
+    ...[...new Set(owners.filter(Boolean))].map((o) => `is:pr is:open user:${o}`),
     ...(login ? [`is:pr is:open involves:${login}`, `is:pr is:open review-requested:${login}`] : []),
   ];
   const found = new Map<string, OpenPull>();
@@ -201,7 +200,7 @@ export async function searchOpenPulls(t: string, owners: string[], login: string
   return [...found.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
-/** Repos (owner/name) que tienen PRs abiertos visibles para el token. */
+/** Repos (owner/name) with open PRs visible to the token. */
 export async function searchPullRepos(t: string, owners: string[], login: string): Promise<string[]> {
   return [...new Set((await searchOpenPulls(t, owners, login)).map((p) => p.repo))];
 }
@@ -226,7 +225,7 @@ export async function listFiles(t: string, repo: string, n: number): Promise<GhF
 export const listReviews = (t: string, repo: string, n: number) =>
   gh<GhReview[]>(t, `/repos/${repo}/pulls/${n}/reviews?per_page=100`);
 
-/** Envía una review. `commitId` fija la revisión al commit que se estaba viendo. */
+/** Submits a review. `commitId` pins it to the commit that was being looked at. */
 export const submitReview = (t: string, repo: string, n: number, event: ReviewEvent, body: string, commitId: string) =>
   gh<GhReview>(t, `/repos/${repo}/pulls/${n}/reviews`, {
     method: "POST",
@@ -235,33 +234,31 @@ export const submitReview = (t: string, repo: string, n: number, event: ReviewEv
 
 export interface Probe { path: string; status: number; headers: Record<string, string>; body: unknown }
 
-/** Llamada cruda para el diagnóstico: devuelve estado, cabeceras relevantes y cuerpo, sin lanzar. */
+/** Raw call for diagnostics: returns status, relevant headers and body without throwing. */
 export async function probe(t: string, path: string): Promise<Probe> {
   try {
-    const res = await fetch(API + path, {
-      headers: { Authorization: `Bearer ${t}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28" },
-    });
+    const res = await fetch(API + path, { headers: headers(t) });
     const keep = ["x-accepted-github-permissions", "x-oauth-scopes", "github-authentication-token-expiration", "x-ratelimit-remaining"];
-    const headers: Record<string, string> = {};
-    for (const k of keep) { const v = res.headers.get(k); if (v) headers[k] = v; }
+    const found: Record<string, string> = {};
+    for (const k of keep) { const v = res.headers.get(k); if (v) found[k] = v; }
     let body: unknown = null;
-    try { body = await res.json(); } catch { /* sin cuerpo */ }
-    return { path, status: res.status, headers, body };
+    try { body = await res.json(); } catch { /* no body */ }
+    return { path, status: res.status, headers: found, body };
   } catch (e) {
     return { path, status: 0, headers: {}, body: (e as Error).message };
   }
 }
 
 /**
- * Prueba (sin efectos) el permiso de escritura en Pull requests del repo. Devuelve el estado HTTP.
- * Envía una review con un `event` inválido: GitHub comprueba el permiso antes de validar, así que
- * un token sin acceso concedido recibe 401/403 y uno con acceso recibe 404/422. Nunca crea nada.
+ * Side-effect-free check of the Pull requests write permission on a repo. Returns the HTTP status.
+ * It sends a review with an invalid `event`: GitHub checks permissions before validating, so a token
+ * without access gets 401/403 and one with access gets 404/422. Nothing is ever created.
  */
 export async function probeReviewStatus(t: string, repo: string): Promise<number> {
   try {
     const res = await fetch(`${API}/repos/${repo}/pulls/1/reviews`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${t}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json" },
+      headers: { ...headers(t), "Content-Type": "application/json" },
       body: JSON.stringify({ event: "__PROBE__" }),
     });
     return res.status;
@@ -270,7 +267,7 @@ export async function probeReviewStatus(t: string, repo: string): Promise<number
   }
 }
 
-/** true = el token tiene permiso, false = no lo tiene, null = no concluyente. */
+/** true = the token has the permission, false = it doesn't, null = inconclusive. */
 export const accessFromStatus = (status: number): boolean | null =>
   status === 401 || status === 403 ? false : status === 404 || status === 422 ? true : null;
 

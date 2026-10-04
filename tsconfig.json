@@ -8,13 +8,8 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "types": [
-      "node"
-    ]
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"]
   },
-  "include": [
-    "src/server.ts",
-    "src/app.ts",
-    "src/electron/main.ts"
-  ]
+  "include": ["src/server/**/*.ts", "src/shared/**/*.ts", "src/electron/**/*.ts"]
 }

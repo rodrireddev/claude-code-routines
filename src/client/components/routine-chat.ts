@@ -1,11 +1,14 @@
 import "./chat-message.js";
 import "./chat-settings.js";
 import "./conversation-list.js";
-import "./pr-review.js";
-import { t, type Key } from "./i18n.js";
-import { store } from "./store.js";
+import "./pull-requests/pr-review.js";
+import "./whatsapp/whatsapp-panel.js";
+import { t, type Key } from "../core/i18n.js";
+import { apiRaw } from "../core/api.js";
+import { store } from "../core/store.js";
 import type { ChatMessage } from "./chat-message.js";
-import type { FireResponse, Message, SlButton, SlTextarea } from "./types.js";
+import type { View } from "./conversation-list.js";
+import type { FireResponse, Message, SlButton, SlTextarea } from "../core/types.js";
 
 /** Messages saved by older versions stored Spanish text instead of a translation key. */
 const LEGACY: Record<string, Key> = {
@@ -42,9 +45,10 @@ export class RoutineChat extends HTMLElement {
         .actions { display:flex; }
         [hidden] { display:none !important; }
         sl-icon-button { font-size:var(--sl-font-size-large); color:var(--sl-color-neutral-600); }
-        pr-review { display:none; }
-        :host(.view-prs) pr-review { display:flex; }
-        :host(.view-prs) #scroll, :host(.view-prs) .composer-wrap, :host(.view-prs) #lock, :host(.view-prs) #gear { display:none; }
+        pr-review, whatsapp-panel { display:none; }
+        :host([view="prs"]) pr-review, :host([view="whatsapp"]) whatsapp-panel { display:flex; }
+        :host([view="prs"]) :is(#scroll, .composer-wrap, #lock, #gear),
+        :host([view="whatsapp"]) :is(#scroll, .composer-wrap, #lock, #gear) { display:none; }
         #scroll { flex:1; overflow-y:auto; }
         #messages { max-width:768px; margin:0 auto; padding:var(--sl-spacing-medium); display:flex; flex-direction:column; gap:var(--sl-spacing-large); }
         .empty { display:none; flex-direction:column; align-items:center; justify-content:center; gap:var(--sl-spacing-x-small); height:100%; color:var(--sl-color-neutral-500); text-align:center; padding:var(--sl-spacing-large); }
@@ -83,6 +87,7 @@ export class RoutineChat extends HTMLElement {
           <div class="hint">${t("chat.hint")}</div>
         </div>
         <pr-review></pr-review>
+        <whatsapp-panel></whatsapp-panel>
         <chat-settings></chat-settings>
       </main>`;
     const root = this.shadowRoot!;
@@ -108,17 +113,16 @@ export class RoutineChat extends HTMLElement {
     root.getElementById("gear")!.addEventListener("click", () => this.#settings.show());
     lock.addEventListener("click", () => void store.lock());
     const list = root.querySelector("conversation-list")!;
-    const setView = (prs: boolean): void => {
-      this.classList.toggle("view-prs", prs);
-      list.toggleAttribute("prs", prs);
+    const setView = (view: View): void => {
+      this.setAttribute("view", view);
+      list.setAttribute("view", view);
       this.#renderTitle();
     };
-    list.addEventListener("open-prs", () => setView(true));
-    list.addEventListener("open-chat", () => setView(false));
+    list.addEventListener("open-view", (e) => setView((e as CustomEvent<View>).detail));
     // A new conversation starts empty: open its settings so the trigger and token can be filled in.
     list.addEventListener("new-conversation", () => this.#settings.show());
     store.addEventListener("change", (e) => {
-      if ((e as CustomEvent).detail === "active") setView(false);
+      if ((e as CustomEvent).detail === "active") setView("chat");
     }, { signal: this.#off.signal });
     const syncLock = (): void => void (lock.hidden = !store.encrypted);
     store.addEventListener("security", syncLock, { signal: this.#off.signal });
@@ -141,8 +145,9 @@ export class RoutineChat extends HTMLElement {
   }
 
   #renderTitle(): void {
-    this.#title.textContent = this.classList.contains("view-prs")
-      ? t("chat.prTitle")
+    const view = this.getAttribute("view");
+    this.#title.textContent = view === "prs" ? t("chat.prTitle")
+      : view === "whatsapp" ? "WhatsApp"
       : store.active.title || t("chat.newConversation");
   }
 
@@ -185,12 +190,8 @@ export class RoutineChat extends HTMLElement {
     this.#updateBusy();
     let result: Partial<Message>;
     try {
-      const r = await fetch("/api/fire", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, triggerId: convo.triggerId, token: convo.token }),
-      });
-      result = this.#toMessage((await r.json()) as FireResponse);
+      const res = await apiRaw<FireResponse>("/api/fire", { text, triggerId: convo.triggerId, token: convo.token });
+      result = this.#toMessage(res);
     } catch (err) {
       result = { text: t("msg.networkError", { msg: (err as Error).message }), variant: "error" };
     }

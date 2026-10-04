@@ -4,7 +4,7 @@
 
 # Routine Chat
 
-**A local, chat-style desktop & web client for firing Claude Code Routines and reviewing the GitHub pull requests they produce.**
+**A chat-style desktop & web client for firing Claude Code Routines and reviewing the GitHub pull requests they produce — also from WhatsApp.**
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Electron](https://img.shields.io/badge/Electron-desktop-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
@@ -26,7 +26,9 @@
 - Every message you send **fires the routine** with your text and shows a link to the Claude Code session it started.
 - When the routine opens a pull request, you can **review, comment on and approve it** from the same app.
 
-Everything runs **on your machine**. Your tokens never touch a third-party server.
+- Link **WhatsApp** and do the same from your phone: `/prs`, `/pr 16`, `/approve 16` (with a yes/no confirmation) or `/fix <task>` to fire a routine.
+
+It runs **on your machine** (desktop app or `localhost`) or on **your own server** with login, encrypted storage and hardened HTTP. Your tokens never touch a third-party service.
 
 ## Features
 
@@ -36,10 +38,11 @@ Everything runs **on your machine**. Your tokens never touch a third-party serve
 | 🗂️ **Multiple routines** | Every conversation has its own trigger ID, token and history. |
 | 💾 **Local history** | Conversations are persisted locally (browser / Electron storage). |
 | 🔐 **Optional encryption** | Lock your data with a passphrase: PBKDF2-SHA256 + AES-256-GCM via WebCrypto. |
+| 📱 **WhatsApp bot** | Scan a QR code and control routines and PRs from your own WhatsApp chat with configurable `/commands`. |
 | 🔍 **Pull request review** | See all your open PRs, read descriptions and diffs, then **Approve**, **Request changes** or **Comment**. |
 | 🌗 **Light / dark / system theme** | One-click theme toggle, remembered between sessions. |
 | 🌍 **4 languages** | English (default), Español, Français and Português, switchable at any time. |
-| 🖥️ **Desktop app** | Ships as an Electron app, or runs in any browser on `localhost`. |
+| 🖥️ **Desktop, web or server** | Electron app, browser on `localhost`, or deployed on a server behind HTTPS with login. |
 | 🧩 **Zero-framework frontend** | Native Web Components written in TypeScript, styled with [Shoelace](https://shoelace.style). |
 
 ## Screenshots
@@ -50,6 +53,9 @@ Everything runs **on your machine**. Your tokens never touch a third-party serve
     <td align="center"><img src="docs/screenshots/chat-dark.png" alt="Dark theme" /><br/><sub><b>Dark theme</b></sub></td>
   </tr>
   <tr>
+    <td align="center" colspan="2"><img src="docs/screenshots/whatsapp.png" alt="WhatsApp bot" width="720" /><br/><sub><b>Link WhatsApp with a QR code and configure the bot's commands</b></sub></td>
+  </tr>
+  <tr>
     <td align="center"><img src="docs/screenshots/settings.png" alt="Per-conversation settings" /><br/><sub><b>Per-conversation trigger & token</b></sub></td>
     <td align="center"><img src="docs/screenshots/lock-screen.png" alt="Encrypted lock screen" /><br/><sub><b>Encrypted local data</b></sub></td>
   </tr>
@@ -57,7 +63,7 @@ Everything runs **on your machine**. Your tokens never touch a third-party serve
 
 ## Quick start
 
-**Requirements:** Node.js 22.9+ and npm.
+**Requirements:** Node.js 22.9+ and npm. `npm install` also downloads the Chrome that Puppeteer uses for WhatsApp.
 
 ```bash
 git clone https://github.com/rodrireddev/github-routine-api.git
@@ -81,15 +87,18 @@ Then:
 
 ```mermaid
 flowchart LR
-    UI["Browser / Electron<br/>Web Components UI"] -- "POST /api/fire<br/>{ text, triggerId, token }" --> S["Local Node server<br/>127.0.0.1"]
-    S -- "POST /v1/claude_code/routines/{id}/fire" --> A["Anthropic API"]
-    UI -- "REST (your GitHub token)" --> G["api.github.com"]
+    UI["Browser / Electron<br/>Web Components UI"] -- "REST + session cookie" --> S["Node server<br/>(local or deployed)"]
+    WA["Your WhatsApp<br/>(“Message yourself”)"] <-- "WhatsApp Web<br/>(whatsapp-web.js + Puppeteer)" --> S
+    S -- "fire routine" --> A["Anthropic API"]
+    S -- "PRs for the bot" --> G["api.github.com"]
+    UI -- "PRs in the UI (your token)" --> G
 ```
 
-- **Routines:** the UI sends each message to a tiny local server (bound to `127.0.0.1`). The server forwards it to the Anthropic API using the conversation's trigger ID and token. The request is made server-side so that browser CORS rules don't get in the way.
-- **GitHub:** pull request calls go **directly** from the UI to `api.github.com`. They never pass through the local server.
+- **Routines from the chat UI:** each message goes to the server, which fires the routine with the conversation's trigger ID and token. The call is made server-side, so browser CORS rules don't get in the way.
+- **WhatsApp bot:** the server runs WhatsApp Web in a headless Chrome (Puppeteer), linked to your phone with a QR code. It reads the commands you write in your own chat and replies there.
+- **Pull requests in the UI:** these calls go directly from the browser to `api.github.com`. The bot uses its own token, stored encrypted on the server.
 
-The request sent for every message is equivalent to:
+The request sent to fire a routine is equivalent to:
 
 ```bash
 curl -X POST https://api.anthropic.com/v1/claude_code/routines/$TRIGGER_ID/fire \
@@ -101,6 +110,34 @@ curl -X POST https://api.anthropic.com/v1/claude_code/routines/$TRIGGER_ID/fire 
 ```
 
 > **Note:** the fire endpoint returns the ID and URL of the Claude Code session it created, not the routine's final output. Routine Chat shows that link so you can follow the session.
+
+## WhatsApp bot
+
+1. Open **WhatsApp** in the sidebar and click **Link WhatsApp**.
+2. On your phone go to **WhatsApp → Settings → Linked devices → Link a device**, and scan the QR code.
+3. Add the **GitHub token** the bot should use. You can reuse the one from the Pull requests view.
+4. Open your own chat (**“Message yourself”**) and send `/help`.
+
+### Default commands
+
+| Command | What it does |
+|---|---|
+| `/help` | Lists the enabled commands. |
+| `/prs` | Lists your open pull requests with their numbers. |
+| `/pr 16` | Shows PR #16, well formatted: description, branches, stats, files and link. Also accepts `/pr#16`, `/pr repo#16`, `/pr owner/repo#16` or a PR URL. |
+| `/approve 16` | Asks **“Approve PR #16 in owner/repo? Reply yes or no”** first. Only `yes` approves; anything else cancels. The confirmation expires after 2 minutes, and the approval is pinned to the commit you were shown. |
+| `/routine <task>` | Fires a routine with the rest of the message, e.g. `/routine create a branch from main and fix the login bug`. Disabled until you set its Trigger ID and token. |
+
+Commands ship in English. In **WhatsApp → Commands** you can rename them, disable them, and add as many routine commands as you like (`/fix`, `/docs`, `/release`, each with its own routine). There is a shortcut to copy the trigger ID and token from a chat conversation.
+
+### Safety rules
+
+- **Only your own chat counts.** The bot reads only messages you write in your own chat. Messages from other people and groups are ignored, so nobody else can run commands.
+- **Notes stay notes.** Messages that don't start with `/` are ignored, so you can keep using the chat for notes.
+- **Approvals always need a yes.** An approval is never executed without an explicit `yes`.
+- **No self-approval.** GitHub doesn't allow approving your own PRs. The bot refuses those up front.
+
+> ⚠️ whatsapp-web.js automates WhatsApp Web, which is not an official WhatsApp API and may break when WhatsApp changes. WhatsApp could restrict accounts that automate it. Link an account you are comfortable using this way.
 
 ## Reviewing pull requests
 
@@ -123,7 +160,7 @@ Reviews are pinned to the commit you were looking at and ask for confirmation be
 
 ## Security & privacy
 
-- **Local only.** The server listens on `127.0.0.1` and only forwards routine calls to `api.anthropic.com`. GitHub calls go straight to `api.github.com`.
+- **Local by default.** The server listens on `127.0.0.1`. Exposing it requires server mode (see [Deploying to a server](#deploying-to-a-server)).
 - **Plain storage by default.** Conversations, trigger IDs and tokens are stored in your local browser/Electron storage.
 - **Optional encryption.** In **⚙ → Security**, set a passphrase:
   - A key is derived with **PBKDF2-SHA256** (600,000 iterations, random salt).
@@ -138,50 +175,104 @@ See [SECURITY.md](SECURITY.md) to report a vulnerability.
 
 ## Configuration
 
-All settings can be made from the UI. Optional defaults can live in a `.env` file (copy [`.env.example`](.env.example)):
+You can change everything from the UI. The server reads optional settings from a `.env` file (copy [`.env.example`](.env.example)):
 
 | Variable | Description | Default |
 |---|---|---|
-| `ROUTINE_TRIGGER_ID` | Fallback trigger ID, used when a conversation has none | – |
-| `ROUTINE_TOKEN` | Fallback routine token | – |
-| `PORT` | Local server port. Keep it fixed: browser storage is per origin, so changing it starts with empty storage. | `3000` |
+| `HOST` | Interface to listen on. Any non-loopback value (e.g. `0.0.0.0`) switches to **server mode**. | `127.0.0.1` |
+| `PORT` | HTTP port. Keep it fixed: browser storage is per origin. | `3000` |
+| `ADMIN_PASSWORD` | Enables the login screen (min. 12 characters). **Required in server mode.** | – |
+| `APP_SECRET` | Encrypts server-side data and protects sessions (min. 32 characters). **Required in server mode**; generated automatically in local mode. | auto |
+| `DATA_DIR` | Where the encrypted bot settings and the WhatsApp session are stored. | `./data` |
+| `TRUST_PROXY` | Set to `true` behind a reverse proxy that terminates HTTPS. The app then honours `X-Forwarded-Proto`/`For` (secure cookies, HSTS, per-IP limits). | `false` |
+| `WHATSAPP_ENABLED` | Set to `false` to disable the WhatsApp bot. | `true` |
+| `PUPPETEER_EXECUTABLE_PATH` | Chrome/Chromium used for WhatsApp Web. Leave it empty to use the browser Puppeteer installs. | – |
+| `ROUTINE_TRIGGER_ID` / `ROUTINE_TOKEN` | Fallback routine for chat conversations without their own. | – |
+
+## Deploying to a server
+
+Server mode is designed for a small VPS or container that **you** control.
+
+```bash
+HOST=0.0.0.0 \
+ADMIN_PASSWORD='a long passphrase' \
+APP_SECRET="$(openssl rand -hex 32)" \
+TRUST_PROXY=true \
+npm start
+```
+
+Or with Docker (Chromium included):
+
+```bash
+docker build -t routine-chat .
+docker run -d --name routine-chat -p 127.0.0.1:3000:3000 \
+  -e ADMIN_PASSWORD='a long passphrase' -e APP_SECRET="$(openssl rand -hex 32)" -e TRUST_PROXY=true \
+  -v routine-chat-data:/data routine-chat
+```
+
+**Put it behind HTTPS.** Use a reverse proxy such as Caddy, nginx or Traefik, and only publish the port on `127.0.0.1`.
+
+**What server mode enforces:**
+
+- **Safe startup:** the server refuses to start without `ADMIN_PASSWORD` and `APP_SECRET`.
+- **Login:**
+  - Sessions are server-side, in `HttpOnly` + `SameSite=Strict` cookies, and are `Secure` over HTTPS.
+  - Login attempts are rate-limited (10 per 15 minutes per IP).
+  - The password check is constant-time.
+- **CSRF protection:** writes must be JSON from the same origin.
+- **Security headers:**
+  - A strict Content-Security-Policy with no inline scripts.
+  - `X-Frame-Options: DENY`, `nosniff`, `no-referrer`, and HSTS over HTTPS.
+- **Limits:** API rate limiting, request-body size limits and request timeouts.
+- **Secrets at rest:** the bot settings (GitHub token, routine tokens) are encrypted with AES-256-GCM, using a key derived from `APP_SECRET`. Tokens are never sent back to the browser.
+- **WhatsApp session:**
+  - The session lives in `DATA_DIR/whatsapp-session`, with `0700` permissions.
+  - Anyone with that folder can use the linked WhatsApp, so back it up and protect it accordingly.
 
 ## Project structure
 
+The code is organised by responsibility. The bot's logic depends on small interfaces (ports), so WhatsApp, GitHub and Anthropic are plain adapters that can be swapped or faked in tests.
+
 ```
 src/
-├── app.ts                  # Local HTTP server: static files + /api/fire proxy
-├── server.ts               # CLI entry point (npm start)
-├── electron/main.ts        # Electron entry point (npm run electron)
-└── client/                 # Frontend (Web Components, compiled to /public)
-    ├── routine-chat.ts     # <routine-chat>: app shell, chat view
-    ├── conversation-list.ts# <conversation-list>: sidebar
-    ├── chat-message.ts     # <chat-message>: message bubble
-    ├── chat-settings.ts    # <chat-settings>: per-conversation settings + security
-    ├── pr-review.ts        # <pr-review>: GitHub pull request review
-    ├── lock-screen.ts      # <lock-screen>: passphrase prompt
-    ├── store.ts            # Local persistence (plain or encrypted)
-    ├── crypto.ts           # PBKDF2 + AES-GCM helpers
-    ├── github.ts           # Minimal GitHub REST client
-    ├── theme.ts            # Light / dark / system theme
-    └── i18n.ts             # UI translations (en, es, fr, pt)
-public/                     # index.html, assets, compiled client JS
-docs/screenshots/           # README images
+├── shared/                  # Used by both the server and the browser
+│   ├── commands.ts          # Command model, defaults, parsers, validation
+│   └── github-api.ts        # GitHub REST client (fetch-only, cached, typed errors)
+├── server/
+│   ├── main.ts              # CLI entry point (npm start)
+│   ├── config.ts            # Env config + local/server mode rules
+│   ├── app.ts               # Composition root: wires services, bot and HTTP
+│   ├── http/                # Router, auth/sessions, security headers, CSRF, rate limits, static files
+│   │   └── routes/          # auth, routines, WhatsApp + bot settings
+│   ├── bot/                 # Command bot: ports, use cases, WhatsApp message formatting
+│   ├── services/            # Routine firing, bot settings (validation, secret masking)
+│   ├── infrastructure/      # Adapters: WhatsApp (whatsapp-web.js), GitHub, encrypted file store
+│   └── __tests__/           # node:test suites
+├── electron/main.ts         # Desktop wrapper (local mode)
+└── client/                  # Browser UI (Web Components, compiled to public/js)
+    ├── main.ts              # Chooses login / lock screen / app
+    ├── core/                # i18n, theme, local store + encryption, API client, DOM helper
+    ├── services/github.ts   # GitHub access for the UI (translated errors, repo discovery)
+    └── components/          # routine-chat, conversation-list, chat-*, lock/login screens,
+        ├── pull-requests/   #   PR review view, its dialogs and preferences
+        └── whatsapp/        #   WhatsApp panel (QR, GitHub token, command editor)
 ```
 
 ### Scripts
 
 | Command | What it does |
 |---|---|
-| `npm start` | Build everything and start the web server |
+| `npm start` | Build everything and start the server |
 | `npm run electron` | Build everything and open the desktop app |
-| `npm run build` | Compile server (`dist/`) and client (`public/*.js`) |
+| `npm test` | Build the server and run the test suite (`node:test`) |
+| `npm run build` | Compile server (`dist/`) and client (`public/js/`) |
 
 ## Roadmap & known limitations
 
 - [ ] Show the routine's final output in the chat (the fire endpoint only returns the session link)
 - [ ] Packaged desktop installers (Windows / macOS / Linux)
 - [ ] Inline review comments on specific diff lines
+- [ ] More bot commands (request changes, merge, routine status)
 - Fine-grained tokens can't enumerate their own repositories (a GitHub API limitation). See [Which token should I use?](#which-token-should-i-use)
 
 ## Contributing

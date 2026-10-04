@@ -16,16 +16,18 @@ Requires Node.js 22.9+.
 
 ## Project layout
 
-- `src/app.ts` – local HTTP server (static files + `/api/fire` proxy to the Anthropic API).
+- `src/shared/` – code used by both the server and the browser (command model, GitHub client).
+- `src/server/` – layered server: `config` → `http` (routes, auth, security) → `bot` (use cases behind ports) → `services` / `infrastructure` (adapters).
 - `src/electron/main.ts` – Electron wrapper.
-- `src/client/` – the frontend: native Web Components in TypeScript, styled with [Shoelace](https://shoelace.style). It compiles to `public/*.js` (git-ignored).
+- `src/client/` – the frontend: native Web Components in TypeScript, styled with [Shoelace](https://shoelace.style). It compiles to `public/js/` (git-ignored).
 
 See the [README](README.md#project-structure) for a file-by-file overview.
 
 ## Guidelines
 
 - **Keep it dependency-light.** The frontend uses plain Web Components with no framework or bundler. Please discuss before adding a dependency.
-- **Type-check before pushing.** `npm run build` must pass with no errors (the project uses `strict` TypeScript).
+- **Type-check and test before pushing.** `npm run build` and `npm test` must pass (the project uses `strict` TypeScript).
+- **Respect the layers.** The bot (`src/server/bot`) must not import WhatsApp, GitHub or HTTP code directly: add a port in `bot/ports.ts` and an adapter in `infrastructure/`. New logic comes with a test in `src/server/__tests__`.
 - **Treat external data as untrusted.** Content from GitHub or the API must be rendered with `textContent` / DOM APIs, never `innerHTML`.
 - **Never log or transmit tokens** anywhere other than the API they belong to (`api.anthropic.com` for routine tokens, `api.github.com` for GitHub tokens).
 - **Match the surrounding code:** small focused modules, the same naming and comment style.
@@ -35,7 +37,7 @@ See the [README](README.md#project-structure) for a file-by-file overview.
 ## Pull requests
 
 1. Fork the repo and create a branch from `main`.
-2. Make your change and run `npm run build`.
+2. Make your change and run `npm run build && npm test`.
 3. Check it manually with `npm start` (and `npm run electron` if relevant).
 4. Open a PR describing **what** changed and **why**, with screenshots for UI changes.
 

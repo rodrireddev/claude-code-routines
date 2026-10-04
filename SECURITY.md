@@ -16,14 +16,24 @@ You can expect an initial response within a few days.
 
 ## Security model (summary)
 
-- The local server binds to `127.0.0.1` and only forwards routine calls to `api.anthropic.com`.
-- GitHub requests go directly from the client to `api.github.com`.
-- Local data (conversations, trigger IDs, tokens) is stored in browser/Electron storage. It can optionally be encrypted with a passphrase (PBKDF2-SHA256, 600k iterations, plus AES-256-GCM).
-- Encryption protects data at rest only. While the app is unlocked, tokens are in memory.
-- Content coming from GitHub or the API is rendered as text, never as HTML.
+- **Local mode** (default): the server binds to `127.0.0.1`, with no login.
+- **Server mode** (any other `HOST`): requires `ADMIN_PASSWORD` and `APP_SECRET`, and adds:
+  - **Sessions:** server-side, in `HttpOnly`, `SameSite=Strict` cookies (`Secure` over HTTPS).
+  - **Login:** rate-limited, with a constant-time password check.
+- **Every API write:** must be same-origin JSON (CSRF protection), is rate-limited and has a size limit.
+- **Every response:** carries a strict CSP (no inline scripts), anti-framing, `nosniff` and `no-referrer` headers, plus HSTS over HTTPS.
+- **Server-side secrets:** the bot's GitHub token and routine tokens are encrypted with AES-256-GCM, using a key derived from `APP_SECRET`. They are never returned to the browser.
+- **Browser-side data:** conversations, trigger IDs and tokens stay in browser/Electron storage. They can be encrypted with a passphrase (PBKDF2-SHA256, 600k iterations, plus AES-256-GCM).
+- **WhatsApp bot:**
+  - It only acts on messages the account owner writes in their own chat.
+  - Approving a PR always needs an explicit `yes` within 2 minutes, and the approval is pinned to the commit that was shown.
+  - The WhatsApp Web session is stored in `DATA_DIR/whatsapp-session` (`0700`). Anyone with that folder can use the linked account.
+- **Untrusted content:** content coming from GitHub or the API is rendered as text, never as HTML.
 
 ## Recommendations for users
 
 - Prefer **fine-grained** GitHub tokens limited to the repositories you review.
 - If you use a classic token, give it a **short expiration**.
 - Enable **encryption** (⚙ → Security) on shared machines.
+- On a server, always use HTTPS (reverse proxy + `TRUST_PROXY=true`), a long `ADMIN_PASSWORD`, and back up `DATA_DIR` securely.
+- Unlink WhatsApp (WhatsApp → Unlink, or from your phone) when you no longer use the bot.

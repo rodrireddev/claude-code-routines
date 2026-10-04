@@ -1,39 +1,21 @@
-import { locale, t } from "./i18n.js";
-import { store } from "./store.js";
-import * as gh from "./github.js";
-import type { GhFile, GhPull, GhRepo, GhReview, ReviewEvent } from "./github.js";
-import type { SlButton, SlInput, SlTextarea } from "./types.js";
+import { locale, t } from "../../core/i18n.js";
+import { h } from "../../core/dom.js";
+import { store } from "../../core/store.js";
+import { diagnosticsDialog, manualReposDialog, pickReposDialog, type RepoContext } from "./pr-dialogs.js";
+import { lastRepo, readPrefs, rememberRepo, savePrefs } from "./repo-prefs.js";
+import * as gh from "../../services/github.js";
+import type { GhFile, GhPull, GhRepo, GhReview, ReviewEvent } from "../../services/github.js";
+import type { SlButton, SlInput, SlTextarea } from "../../core/types.js";
 
 interface SlSelect extends HTMLElement { value: string | string[]; disabled: boolean; placeholder: string }
 
-const REPO_KEY = "routine-chat.repo.v1";
-/** Valor especial del selector: todos los PRs abiertos visibles para el token, de cualquier repo. */
+/** Special dropdown value: every open PR visible to the token, from any repo. */
 const ALL = "__all__";
-const PREFS_KEY = "routine-chat.repos.v1";
-
-interface RepoPrefs { manual: string[]; /** null = mostrar todos los que devuelve GitHub */ enabled: string[] | null }
-
-function readPrefs(): RepoPrefs {
-  try {
-    const p = JSON.parse(localStorage.getItem(PREFS_KEY) ?? "{}") as Partial<RepoPrefs>;
-    return { manual: p.manual ?? [], enabled: p.enabled ?? null };
-  } catch {
-    return { manual: [], enabled: null };
-  }
-}
 const MAX_DIFF_LINES = 500;
-
-/** Crea un elemento; los hijos string se insertan como texto (nunca como HTML). */
-function h(tag: string, props: Record<string, string> = {}, ...children: (Node | string | null)[]): HTMLElement {
-  const el = document.createElement(tag);
-  for (const [k, v] of Object.entries(props)) el.setAttribute(k, v);
-  for (const c of children) if (c !== null) el.append(c);
-  return el;
-}
 
 const ago = (iso: string): string => new Date(iso).toLocaleString(locale());
 
-/** <pr-review> — revisa y aprueba Pull Requests de GitHub con un fine-grained token. */
+/** <pr-review> — lists, reviews and approves GitHub pull requests with the user's token. */
 export class PrReview extends HTMLElement {
   #root!: ShadowRoot;
   #repo = "";
@@ -155,8 +137,17 @@ export class PrReview extends HTMLElement {
   /** Resultado de la detección de acceso por repo (modo automático). */
   #access = new Map<string, boolean | null>();
 
+  /** Shared state handed to the dialogs. */
+  readonly #ctx: RepoContext = {
+    prefs: this.#prefs,
+    savePrefs: () => this.#savePrefs(),
+    allRepos: () => this.#allRepos,
+    login: () => this.#login,
+    reloadAll: () => this.#reloadAll(),
+  };
+
   #savePrefs(): void {
-    try { localStorage.setItem(PREFS_KEY, JSON.stringify(this.#prefs)); } catch { /* ignorar */ }
+    savePrefs(this.#prefs);
   }
 
   #renderMain(): void {
@@ -173,8 +164,8 @@ export class PrReview extends HTMLElement {
     openBar.querySelector("sl-input")!.setAttribute("style", "flex:1");
     const list = h("div", { class: "list" });
     const detail = h("div", { class: "detail" }, h("div", { class: "center" }, t("pr.choose")));
-    const dialog = this.#manualDialog((reload) => (reload ? void this.#loadRepos(select, detail) : this.#populate(select)));
-    const diagDialog = this.#diagnosticDialog();
+    const dialog = manualReposDialog(this.#ctx, (reload) => (reload ? void this.#loadRepos(select, detail) : this.#populate(select)));
+    const diagDialog = diagnosticsDialog(this.#ctx);
     this.#view.replaceChildren(bar, openBar, h("div", { class: "cols" }, list, detail), dialog, diagDialog);
     this.#view.style.display = "contents";
 
@@ -184,7 +175,7 @@ export class PrReview extends HTMLElement {
     diag.addEventListener("click", () => (diagDialog as unknown as { show(): void }).show());
     add.addEventListener("click", () => (dialog as unknown as { show(): void }).show());
     pick.addEventListener("click", () => {
-      const d = this.#pickDialog(() => this.#populate(select));
+      const d = pickReposDialog(this.#ctx, () => this.#populate(select));
       this.#view.append(d);
       d.addEventListener("sl-after-hide", () => d.remove());
       (d as unknown as { show(): void }).show();
@@ -196,7 +187,7 @@ export class PrReview extends HTMLElement {
     select.addEventListener("sl-change", () => {
       const v = select.value as string;
       this.#repo = v;
-      try { localStorage.setItem(REPO_KEY, v); } catch { /* ignorar */ }
+      rememberRepo(v);
       if (v) void this.#loadPulls(v);
       else { list.replaceChildren(); this.#pulls = []; }
     });
@@ -219,7 +210,7 @@ export class PrReview extends HTMLElement {
         await (select as unknown as { updateComplete: Promise<unknown> }).updateComplete;
         select.value = repo;
         this.#repo = repo;
-        try { localStorage.setItem(REPO_KEY, repo); } catch { /* ignorar */ }
+        rememberRepo(repo);
         urlInput.value = "";
         void this.#loadPulls(repo);
         await this.#openPull(repo, Number(num));
@@ -287,150 +278,8 @@ export class PrReview extends HTMLElement {
     }
   }
 
-  /** Diálogo para elegir qué repos mostrar (GitHub no dice cuáles se concedieron al token). */
-  #pickDialog(onChange: () => void): HTMLElement {
-    const dialog = h("sl-dialog", { label: t("pick.title") });
-    const all = [...this.#allRepos].sort((a, b) => Number(b.private) - Number(a.private) || a.full_name.localeCompare(b.full_name));
-    const current = this.#prefs.enabled ? new Set(this.#prefs.enabled) : new Set(all.map((r) => r.full_name));
-    const boxes = all.map((r) => {
-      const cb = h("sl-checkbox", {}, `${r.private ? "🔒 " : ""}${r.full_name}${r.private ? "" : t("pr.public")}`) as HTMLElement & { checked: boolean };
-      cb.checked = current.has(r.full_name);
-      cb.dataset.repo = r.full_name;
-      return cb;
-    });
-    const status = h("div", { class: "muted" });
-    const setAll = (v: boolean): void => boxes.forEach((b) => (b.checked = v));
-    const allBtn = h("sl-button", { size: "small" }, t("pick.all"));
-    const noneBtn = h("sl-button", { size: "small" }, t("pick.none"));
-    const detect = h("sl-button", { size: "small" }, t("pick.detect")) as HTMLElement & SlButton;
-    const autoBtn = h("sl-button", { size: "small", variant: "primary" }, t("pick.auto"));
-    autoBtn.addEventListener("click", () => {
-      this.#prefs.enabled = null;
-      this.#savePrefs();
-      (dialog as unknown as { hide(): void }).hide();
-      void this.#reloadAll();
-    });
-    allBtn.addEventListener("click", () => setAll(true));
-    noneBtn.addEventListener("click", () => setAll(false));
-    detect.addEventListener("click", async () => {
-      detect.loading = true;
-      status.textContent = t("pick.checking");
-      const results = await Promise.all(all.map((r) => gh.probeReviewAccess(store.githubToken, r.full_name)));
-      boxes.forEach((b, i) => { if (results[i] !== null) b.checked = results[i] === true; });
-      const n = results.filter((x) => x === true).length;
-      const u = results.filter((x) => x === null).length;
-      status.textContent = t("pick.result", { n, total: all.length, unknown: u ? t("pick.unknown", { u }) : "" });
-      detect.loading = false;
-    });
-    const save = h("sl-button", { slot: "footer", variant: "primary" }, t("pick.save"));
-    save.addEventListener("click", () => {
-      const sel = boxes.filter((b) => b.checked).map((b) => b.dataset.repo!);
-      this.#prefs.enabled = sel;
-      this.#savePrefs();
-      onChange();
-      (dialog as unknown as { hide(): void }).hide();
-    });
-    dialog.append(
-      h("div", { class: "muted", style: "margin-bottom:8px" }, t("pick.help")),
-      h("div", { style: "display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px" }, autoBtn, allBtn, noneBtn, detect),
-      status,
-      h("div", { style: "display:grid;gap:6px;margin-top:8px;max-height:40vh;overflow:auto" }, ...boxes),
-      save);
-    return dialog;
-  }
 
-  /** Muestra qué responde GitHub (sin el token) para entender por qué faltan repositorios. */
-  #diagnosticDialog(): HTMLElement {
-    const dialog = h("sl-dialog", { label: t("diag.title"), style: "--width:min(720px,95vw)" });
-    const pre = h("pre", { style: "white-space:pre-wrap;word-break:break-word;font:12px/1.5 var(--sl-font-mono);max-height:55vh;overflow:auto;margin:0" });
-    const run = async (): Promise<void> => {
-      pre.textContent = t("diag.querying");
-      const tok = store.githubToken;
-      const names = (b: unknown): string[] => (Array.isArray(b) ? (b as { full_name?: string; login?: string; private?: boolean }[]).map((x) => `${x.private ? t("diag.private") : ""}${x.full_name ?? x.login}`) : []);
-      const paths = [
-        "/user",
-        "/user/repos?per_page=100&affiliation=owner,collaborator,organization_member",
-        "/user/repos?per_page=100&visibility=private",
-        "/user/orgs?per_page=100",
-        "/user/memberships/orgs?per_page=100",
-      ];
-      const out: string[] = [];
-      for (const path of paths) {
-        const r = await gh.probe(tok, path);
-        const list = names(r.body);
-        out.push(`GET ${path}\n  ${t("diag.status")}: ${r.status}`);
-        for (const [k, v] of Object.entries(r.headers)) out.push(`  ${k}: ${v}`);
-        if (r.status === 200 && path === "/user") out.push(`  ${t("diag.user")}: ${(r.body as { login?: string }).login}`);
-        else if (r.status === 200) out.push(`  ${t("diag.results")}: ${list.length}${list.length ? "\n    " + list.slice(0, 40).join("\n    ") : ""}`);
-        else out.push(`  ${t("diag.response")}: ${JSON.stringify(r.body)}`);
-        out.push("");
-      }
-      for (const q of [`is:pr is:open user:${this.#login}`, `is:pr is:open involves:${this.#login}`]) {
-        const r = await gh.probe(tok, `/search/issues?q=${encodeURIComponent(q)}&per_page=100`);
-        const items = ((r.body as { items?: { repository_url: string }[] }).items ?? []).map((i) => i.repository_url.replace(/^.*\/repos\//, ""));
-        out.push(`GET /search/issues?q=${q}\n  ${t("diag.status")}: ${r.status}\n  ${t("diag.openPrs")}: ${items.length}\n  ${t("diag.repos")}: ${[...new Set(items)].join(", ") || t("diag.none")}\n`);
-      }
-      out.push(t("diag.probe"));
-      const repos = this.#allRepos.slice(0, 60).map((r) => r.full_name);
-      const statuses = await Promise.all(repos.map((r) => gh.probeReviewStatus(tok, r)));
-      repos.forEach((r, i) => out.push(`  ${statuses[i]}  ${r}`));
-      pre.textContent = out.join("\n");
-    };
-    const again = h("sl-button", { slot: "footer", variant: "primary" }, t("diag.again"));
-    again.addEventListener("click", () => void run());
-    dialog.append(h("div", { class: "muted", style: "margin-bottom:8px" }, t("diag.help")), pre, again);
-    dialog.addEventListener("sl-after-show", () => void run());
-    return dialog;
-  }
 
-  /** Diálogo para añadir/quitar repositorios a mano (p. ej. públicos concedidos al token). */
-  #manualDialog(onChange: (reload: boolean) => void): HTMLElement {
-    const dialog = h("sl-dialog", { label: t("man.title") });
-    const input = h("sl-input", { placeholder: t("man.placeholder"), autocomplete: "off" }) as unknown as SlInput;
-    const err = h("div", { class: "err" });
-    const addBtn = h("sl-button", { variant: "primary" }, t("man.add")) as unknown as HTMLElement & SlButton;
-    const items = h("div", { style: "display:grid;gap:4px" });
-    const renderItems = (): void => {
-      items.replaceChildren(...this.#prefs.manual.map((name) => {
-        const del = h("sl-icon-button", { name: "trash", label: t("man.remove") });
-        del.addEventListener("click", () => {
-          this.#prefs.manual = this.#prefs.manual.filter((n) => n !== name);
-          this.#savePrefs();
-          renderItems();
-          onChange(!name.includes("/"));
-        });
-        return h("div", { style: "display:flex;align-items:center;justify-content:space-between" }, h("span", {}, name), del);
-      }));
-    };
-    const submit = async (): Promise<void> => {
-      const name = input.value.trim().replace(/^https?:\/\/github\.com\//, "").replace(/\/$/, "");
-      const isRepo = /^[\w.-]+\/[\w.-]+$/.test(name);
-      if (!isRepo && !/^[\w.-]+$/.test(name)) { err.textContent = t("man.badFormat"); return; }
-      addBtn.loading = true;
-      err.textContent = "";
-      try {
-        let entry = name;
-        if (isRepo) entry = (await gh.getRepo(store.githubToken, name)).full_name;
-        else await gh.listOwnerRepos(store.githubToken, name); // valida que el dueño existe y es accesible
-        if (!this.#prefs.manual.includes(entry)) this.#prefs.manual.push(entry);
-        this.#savePrefs();
-        input.value = "";
-        renderItems();
-        onChange(!isRepo);
-      } catch (e) {
-        err.textContent = (e as Error).message;
-      } finally {
-        addBtn.loading = false;
-      }
-    };
-    addBtn.addEventListener("click", () => void submit());
-    input.addEventListener("keydown", (e) => { if ((e as KeyboardEvent).key === "Enter") void submit(); });
-    renderItems();
-    dialog.append(
-      h("div", { class: "muted", style: "margin-bottom:8px" }, t("man.help")),
-      h("div", { style: "display:flex;gap:8px" }, input, addBtn), err, h("div", { style: "margin-top:12px" }, items));
-    return dialog;
-  }
 
   /** Comprueba, con poca concurrencia, en qué repos tiene permiso de Pull requests el token. */
   async #detectAccess(repos: GhRepo[]): Promise<void> {
@@ -466,7 +315,7 @@ export class PrReview extends HTMLElement {
       this.#populate(select);
       const repos = this.#visibleRepos();
       let saved = "";
-      try { saved = localStorage.getItem(REPO_KEY) ?? ""; } catch { /* ignorar */ }
+      saved = lastRepo();
       // Por defecto se abre "Todos mis PRs abiertos", salvo que el último repo elegido siga disponible.
       const target = saved && (saved === ALL || repos.some((r) => r.full_name === saved)) ? saved : ALL;
       if (!this.#repo) {

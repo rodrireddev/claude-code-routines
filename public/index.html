@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="es">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -7,17 +7,10 @@
   <link rel="icon" type="image/png" href="/assets/favicon.png" />
   <link rel="stylesheet" href="/vendor/shoelace/themes/light.css" />
   <link rel="stylesheet" href="/vendor/shoelace/themes/dark.css" />
-  <script>
-    // Evita el parpadeo: aplica el tema guardado antes de pintar (la lógica completa está en theme.ts).
-    try {
-      const m = localStorage.getItem("routine-chat.theme.v1") || "system";
-      const dark = m === "dark" || (m === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
-      document.documentElement.classList.toggle("sl-theme-dark", dark);
-    } catch {}
-  </script>
+  <script src="/boot.js"></script>
   <script type="module" data-shoelace="/vendor/shoelace" src="/vendor/shoelace/shoelace.js"></script>
   <style>
-    /* Paleta cálida tipo Claude sobre las variables de Shoelace */
+    /* Warm, Claude-like palette on top of Shoelace variables */
     :root, :root.sl-theme-dark {
       --sl-color-primary-50:#fbf1ed; --sl-color-primary-100:#f6e0d7; --sl-color-primary-200:#eec3b1;
       --sl-color-primary-300:#e4a187; --sl-color-primary-400:#d77f5e; --sl-color-primary-500:#cc6a49;
@@ -28,10 +21,10 @@
     }
     html, body { height:100%; margin:0; }
     body { background:var(--sl-color-neutral-0); color:var(--sl-color-neutral-900); font-family:var(--sl-font-sans); font-size:var(--sl-font-size-medium); }
-    routine-chat, lock-screen { height:100%; }
+    routine-chat, lock-screen, login-screen { height:100%; }
   </style>
 </head>
 <body>
-  <script type="module" src="/main.js"></script>
+  <script type="module" src="/js/client/main.js"></script>
 </body>
 </html>

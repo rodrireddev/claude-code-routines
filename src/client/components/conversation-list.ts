@@ -1,6 +1,9 @@
-import { store } from "./store.js";
-import { cycleTheme, getTheme, type ThemeMode } from "./theme.js";
-import { getLang, LANGUAGES, setLang, t, type Lang } from "./i18n.js";
+import { logout, session } from "../core/api.js";
+import { store } from "../core/store.js";
+
+export type View = "chat" | "prs" | "whatsapp";
+import { cycleTheme, getTheme, type ThemeMode } from "../core/theme.js";
+import { getLang, LANGUAGES, setLang, t, type Lang } from "../core/i18n.js";
 
 /** <conversation-list> — barra lateral con las conversaciones guardadas. */
 export class ConversationList extends HTMLElement {
@@ -16,14 +19,18 @@ export class ConversationList extends HTMLElement {
         .top { padding:var(--sl-spacing-x-small) var(--sl-spacing-small) var(--sl-spacing-small); }
         .top sl-button { width:100%; }
         .top sl-button::part(base) { justify-content:flex-start; background:transparent; border-color:var(--sl-color-neutral-300); }
-        .foot { padding:var(--sl-spacing-x-small) var(--sl-spacing-small); border-top:1px solid var(--sl-color-neutral-200); }
+        .foot { padding:var(--sl-spacing-2x-small) var(--sl-spacing-small) var(--sl-spacing-x-small); }
         .foot { display:flex; align-items:center; gap:var(--sl-spacing-2x-small); }
-        .foot .prs { flex:1; }
+        .foot .spacer { flex:1; }
+        .nav { display:grid; padding:var(--sl-spacing-x-small) var(--sl-spacing-small) 0; border-top:1px solid var(--sl-color-neutral-200); }
+        .nav sl-button { width:100%; }
+        .nav sl-button::part(base) { justify-content:flex-start; }
+        :host([view="prs"]) .nav [data-view="prs"]::part(base), :host([view="whatsapp"]) .nav [data-view="whatsapp"]::part(base) { background:var(--sl-color-neutral-200); }
+        :host([view="prs"]) .item.active, :host([view="whatsapp"]) .item.active { background:transparent; font-weight:var(--sl-font-weight-normal); }
+        .foot sl-icon-button { font-size:var(--sl-font-size-large); color:var(--sl-color-neutral-600); }
         .lang sl-icon-button { font-size:var(--sl-font-size-large); color:var(--sl-color-neutral-600); }
         .theme { font-size:var(--sl-font-size-large); color:var(--sl-color-neutral-600); }
         .foot sl-button::part(base) { justify-content:flex-start; }
-        :host([prs]) .foot sl-button::part(base) { background:var(--sl-color-neutral-200); }
-        :host([prs]) .item.active { background:transparent; font-weight:var(--sl-font-weight-normal); }
         .label { padding:var(--sl-spacing-x-small) var(--sl-spacing-medium); font-size:var(--sl-font-size-x-small); color:var(--sl-color-neutral-500); }
         nav { flex:1; overflow-y:auto; padding:0 var(--sl-spacing-x-small) var(--sl-spacing-small); display:flex; flex-direction:column; gap:2px; }
         .item { display:flex; align-items:center; gap:var(--sl-spacing-2x-small); padding:var(--sl-spacing-x-small) var(--sl-spacing-small); border-radius:var(--sl-border-radius-large); cursor:pointer; }
@@ -38,7 +45,11 @@ export class ConversationList extends HTMLElement {
       <div class="top"><sl-button><sl-icon slot="prefix" name="plus-lg"></sl-icon>${t("side.new")}</sl-button></div>
       <div class="label">${t("side.conversations")}</div>
       <nav></nav>
-      <div class="foot"><sl-button class="prs" variant="text"><sl-icon slot="prefix" name="github"></sl-icon>Pull requests</sl-button><sl-dropdown class="lang" placement="top-end" hoist>
+      <div class="nav">
+        <sl-button variant="text" data-view="prs"><sl-icon slot="prefix" name="github"></sl-icon>Pull requests</sl-button>
+        <sl-button variant="text" data-view="whatsapp"><sl-icon slot="prefix" name="whatsapp"></sl-icon>WhatsApp</sl-button>
+      </div>
+      <div class="foot"><span class="spacer"></span>${session.authRequired ? `<sl-icon-button class="logout" name="box-arrow-right" label="${t("side.logout")}"></sl-icon-button>` : ""}<sl-dropdown class="lang" placement="top-end" hoist>
           <sl-icon-button slot="trigger" name="translate" label="${t("side.language")}"></sl-icon-button>
           <sl-menu>${LANGUAGES.map((l) => `<sl-menu-item type="checkbox" value="${l.code}"${l.code === getLang() ? " checked" : ""}>${l.name}</sl-menu-item>`).join("")}</sl-menu>
         </sl-dropdown><sl-icon-button class="theme" name="circle-half"></sl-icon-button></div>`;
@@ -61,8 +72,10 @@ export class ConversationList extends HTMLElement {
     });
     this.shadowRoot!.querySelector("sl-menu")!.addEventListener("sl-select", (e) =>
       setLang((e as CustomEvent<{ item: { value: string } }>).detail.item.value as Lang));
-    this.shadowRoot!.querySelector(".prs")!.addEventListener("click", () =>
-      this.dispatchEvent(new Event("open-prs", { bubbles: true, composed: true })));
+    for (const btn of this.shadowRoot!.querySelectorAll<HTMLElement>(".nav sl-button")) {
+      btn.addEventListener("click", () => this.#openView(btn.dataset.view as View));
+    }
+    this.shadowRoot!.querySelector(".logout")?.addEventListener("click", () => void logout());
     const theme = this.shadowRoot!.querySelector(".theme")!;
     const syncTheme = (): void => {
       const mode: ThemeMode = getTheme();
@@ -78,7 +91,11 @@ export class ConversationList extends HTMLElement {
 
   /** Pide volver a la vista de chat (p. ej. desde Pull requests), aunque la conversación ya estuviera activa. */
   #openChat(): void {
-    this.dispatchEvent(new Event("open-chat", { bubbles: true, composed: true }));
+    this.#openView("chat");
+  }
+
+  #openView(view: View): void {
+    this.dispatchEvent(new CustomEvent<View>("open-view", { detail: view, bubbles: true, composed: true }));
   }
 
   #render(): void {

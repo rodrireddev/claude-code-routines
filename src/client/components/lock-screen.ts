@@ -1,6 +1,6 @@
-import { t, type Key } from "./i18n.js";
-import { store } from "./store.js";
-import type { SlButton, SlInput } from "./types.js";
+import { t, type Key } from "../core/i18n.js";
+import { store } from "../core/store.js";
+import type { SlButton, SlInput } from "../core/types.js";
 
 /** <lock-screen> — pide la contraseña para descifrar los datos locales. Emite "unlocked". */
 export class LockScreen extends HTMLElement {

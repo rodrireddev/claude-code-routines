@@ -1,35 +1,45 @@
 import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { app, BrowserWindow, shell } from "electron";
-import { startServer } from "../app.js";
+import { createApp } from "../server/app.js";
+import { loadConfig } from "../server/config.js";
 
-// Puerto fijo: el origen (localhost:PORT) define el localStorage donde se guardan Trigger ID y Token.
-const PORT = Number(process.env.PORT ?? 3000);
-
-async function createWindow(): Promise<void> {
+/**
+ * Desktop wrapper: runs the server in local mode (127.0.0.1, no login) and opens it in a window.
+ * The port stays fixed because browser storage (conversations, settings) is per origin.
+ */
+async function createWindow(url: string): Promise<void> {
   const win = new BrowserWindow({
-    width: 900,
-    height: 720,
+    width: 1100,
+    height: 760,
     title: "Routine Chat",
     icon: fileURLToPath(new URL("../../public/assets/logo-512.png", import.meta.url)),
     webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false },
   });
   win.setMenuBarVisibility(false);
 
-  // Los enlaces externos (p. ej. la sesión de Claude) se abren en el navegador del sistema.
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
+  // External links (e.g. the Claude session) open in the system browser.
+  win.webContents.setWindowOpenHandler(({ url: target }) => {
+    if (/^https:\/\//.test(target)) void shell.openExternal(target);
     return { action: "deny" };
   });
-
-  await win.loadURL(`http://127.0.0.1:${PORT}`);
+  await win.loadURL(url);
 }
 
 app.whenReady().then(async () => {
-  await startServer(PORT);
-  await createWindow();
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) void createWindow();
+  const config = loadConfig({
+    ...process.env,
+    HOST: "127.0.0.1",
+    DATA_DIR: process.env.DATA_DIR ?? join(app.getPath("userData"), "data"),
   });
+  const server = createApp(config);
+  await server.listen();
+  const url = `http://127.0.0.1:${config.port}`;
+  await createWindow(url);
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length === 0) void createWindow(url);
+  });
+  app.on("before-quit", () => void server.close());
 });
 
 app.on("window-all-closed", () => app.quit());

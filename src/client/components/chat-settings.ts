@@ -1,6 +1,6 @@
-import { getLang, LANGUAGES, setLang, t, type Lang } from "./i18n.js";
-import { store } from "./store.js";
-import type { SlDrawer, SlInput } from "./types.js";
+import { getLang, LANGUAGES, setLang, t, type Lang } from "../core/i18n.js";
+import { store } from "../core/store.js";
+import type { SlDrawer, SlInput } from "../core/types.js";
 
 /** <chat-settings> — panel lateral con nombre, Trigger ID y Token de la conversación activa. */
 export class ChatSettings extends HTMLElement {

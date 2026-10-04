@@ -1,7 +1,8 @@
 node_modules
 dist
 public/js
-public/*.js
-!public/boot.js
-.env
 data
+.env
+.git
+docs
+*.md
