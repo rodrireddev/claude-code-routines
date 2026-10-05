@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { create, type Message, type Whatsapp } from "@wppconnect-team/wppconnect";
 import puppeteer, { type Browser, type LaunchOptions } from "puppeteer";
 import type { ChatGateway, IncomingMessage } from "../bot/ports.js";
+import { classifyMetaAiMessage, isMetaAiId, META_AI_CHAT_IDS, META_AI_NUMBER } from "./meta-ai-chat.js";
 import { classifyMessage, type RawMessage } from "./own-chat.js";
 
 export type WhatsAppStatus = "disabled" | "disconnected" | "connecting" | "qr" | "connected";
@@ -36,6 +37,8 @@ const MAX_ACTIVITY = 60;
 
 const MAX_TRACKED_IDS = 500;
 const POLL_INTERVAL_MS = 3000;
+/** Meta AI may edit its reply while writing it: wait until the text stops changing. */
+const META_AI_SETTLE_MS = 1500;
 
 /** Shape of WhatsApp Web's internal message model (only the fields we read, inside the page). */
 interface RawMsgModel {
@@ -58,8 +61,12 @@ const UNLINKED = new Set(["disconnectedMobile", "deleteToken"]);
  * linked to the phone by scanning a QR code. Same setup as rodrireddev/companion-ai
  * (`useChrome`, `autoClose: 0`, `catchQR` → image for the UI, `onAnyMessage` + `sendText`).
  *
- * Security: only messages the account owner writes in their own chat ("Message yourself") reach
- * the bot. Messages from other people or groups are ignored, so nobody else can run commands.
+ * Commands arrive two ways, both only from the account owner:
+ *  - Meta AI chat (recommended): you ask Meta AI to repeat a command and the bot runs the command in
+ *    Meta AI's reply. Incoming messages are what WhatsApp Web reports reliably. Only Meta AI can
+ *    write in that chat, and only you can write to Meta AI from your account.
+ *  - Own chat ("Message yourself"): works when WhatsApp Web reports the messages typed on the phone.
+ * Replies always go to your own chat. Messages from other people or groups are ignored.
  * The browser profile (WhatsApp credentials) lives in DATA_DIR/whatsapp-session: protect it.
  */
 export class WhatsAppGateway implements ChatGateway {
@@ -83,6 +90,8 @@ export class WhatsAppGateway implements ChatGateway {
   #polling = false;
   /** The account's own chat IDs ("…@c.us" and, on newer accounts, "…@lid"). */
   #ownIds = new Set<string>();
+  /** Meta AI replies waiting for their text to settle, by message ID. */
+  #metaAiPending = new Map<string, { body: string; timer: NodeJS.Timeout }>();
 
   constructor(options: WhatsAppOptions) {
     this.#sessionDir = join(options.dataDir, "whatsapp-session");
@@ -151,15 +160,18 @@ export class WhatsAppGateway implements ChatGateway {
       this.#client = client;
       await this.#loadOwnIds(client);
       this.#connectedAt = Math.floor(Date.now() / 1000) - 5;
+      const wid = await client.getWid().catch(() => "");
+      writeFileSync(this.#linkedMarker, new Date().toISOString(), { mode: 0o600 });
+      // Connected before installing the extra listeners: replies can be sent right away.
+      this.#setState({ status: "connected", account: wid.split("@")[0] });
       client.onAnyMessage((message: Message) => void this.#dispatch(client, fromWppMessage(message)));
-      await this.#watchOwnChat(client);
       // If WhatsApp Web is opened somewhere else, take the session back.
       client.onStateChange((state) => {
         if (String(state) === "CONFLICT") void client.useHere().catch(() => undefined);
       });
-      const wid = await client.getWid().catch(() => "");
-      writeFileSync(this.#linkedMarker, new Date().toISOString(), { mode: 0o600 });
-      this.#setState({ status: "connected", account: wid.split("@")[0] });
+      this.#pollTimer = setInterval(() => void this.#pollChats(client), POLL_INTERVAL_MS);
+      this.#log("info", `ready. Ask Meta AI to repeat a command (e.g. "Repeat exactly: /help"); replies arrive in your own chat`);
+      void this.#watchStore(client);
     } catch (e) {
       this.#setState({ status: "disconnected", error: `Could not start WhatsApp Web: ${(e as Error).message ?? e}` });
       await this.#shutdown(false);
@@ -253,6 +265,7 @@ export class WhatsAppGateway implements ChatGateway {
    */
   async #dispatch(client: Whatsapp, message: RawMessage): Promise<void> {
     if (!message.id || this.#processed.has(message.id)) return;
+    if (!message.fromMe && (isMetaAiId(message.chat) || isMetaAiId(message.from))) return this.#onMetaAiMessage(message);
     // Messages still being decrypted ("ciphertext", or "chat" with no body yet) come back later
     // with their final content: only mark complete text messages as processed.
     if (message.type === "chat" && message.body.trim()) this.#processed.add(message.id);
@@ -265,6 +278,41 @@ export class WhatsAppGateway implements ChatGateway {
     } catch (e) {
       this.#log("error", `handling a message failed: ${(e as Error)?.message ?? e}`);
     }
+  }
+
+  /** Debounces a Meta AI message (it may be edited while written), then runs the command it holds. */
+  #onMetaAiMessage(message: RawMessage): void {
+    const previous = this.#metaAiPending.get(message.id);
+    if (previous && previous.body === message.body) return;
+    if (previous) clearTimeout(previous.timer);
+    const timer = setTimeout(() => {
+      this.#metaAiPending.delete(message.id);
+      void this.#handleMetaAi(message);
+    }, META_AI_SETTLE_MS);
+    this.#metaAiPending.set(message.id, { body: message.body, timer });
+  }
+
+  async #handleMetaAi(message: RawMessage): Promise<void> {
+    if (this.#processed.has(message.id)) return;
+    const result = classifyMetaAiMessage(message, this.#connectedAt);
+    if (!result.accept) {
+      if (result.log) this.#log("ignored", `Meta AI: "${message.body.trim().slice(0, 40)}" (via ${message.source}): ${result.reason}`);
+      return;
+    }
+    this.#processed.add(message.id);
+    const chatId = this.#replyChat;
+    if (!chatId) return this.#log("error", `Meta AI repeated "${result.text}" but the own chat is unknown`);
+    this.#log("received", `"${result.text.slice(0, 60)}" (repeated by Meta AI, via ${message.source})`);
+    try {
+      for (const handler of this.#handlers) await handler({ chatId, text: result.text });
+    } catch (e) {
+      this.#log("error", `handling a message failed: ${(e as Error)?.message ?? e}`);
+    }
+  }
+
+  /** Where replies to Meta AI commands go: the own chat, by phone ID (the most reliable to send to). */
+  get #replyChat(): string | undefined {
+    return [...this.#ownIds].find((id) => id.endsWith("@c.us")) ?? [...this.#ownIds][0];
   }
 
   /** Keeps only text messages the owner wrote in their own chat, excluding the bot's replies. */
@@ -286,39 +334,41 @@ export class WhatsAppGateway implements ChatGateway {
   /**
    * WPPConnect's onAnyMessage only fires for messages WhatsApp Web flags as "new", and messages
    * typed on the phone in your own chat may arrive synced without that flag. So we also listen to
-   * WhatsApp Web's message store directly, and poll the own chat every few seconds as a backstop.
+   * WhatsApp Web's message store directly; the chats are also polled every few seconds as a backstop.
    */
-  async #watchOwnChat(client: Whatsapp): Promise<void> {
+  async #watchStore(client: Whatsapp): Promise<void> {
     const page = client.page;
     try {
       await page.exposeFunction("routineChatMessage", (m: RawMessage) => void this.#dispatch(client, { ...m, source: "store" }));
     } catch (e) {
       this.#log("error", `could not expose the message callback: ${(e as Error).message}`);
     }
-    await this.#attachStoreListener(client);
     // A reload of WhatsApp Web drops listeners installed in the page: install it again.
     page.on("load", () => void this.#attachStoreListener(client));
-
-    this.#pollTimer = setInterval(() => void this.#pollOwnChat(client), POLL_INTERVAL_MS);
+    await this.#attachStoreListener(client);
   }
 
   async #attachStoreListener(client: Whatsapp): Promise<void> {
     try {
       // Waits until WA-JS is injected again after a reload.
-      await client.page.waitForFunction(() => !!(globalThis as unknown as { WPP?: { whatsapp?: { MsgStore?: unknown } } }).WPP?.whatsapp?.MsgStore, { timeout: 60_000 });
-      await client.page.evaluate((ownIds: string[]) => {
+      await client.page.waitForFunction(() => !!(globalThis as unknown as { WPP?: { whatsapp?: { MsgStore?: unknown } } }).WPP?.whatsapp?.MsgStore, { timeout: 60_000, polling: 1000 });
+      await client.page.evaluate((ownIds: string[], metaAi: string) => {
         const w = globalThis as unknown as {
           WPP: { whatsapp: { MsgStore: { on(event: string, cb: (msg: RawMsgModel) => void): void } } };
           routineChatMessage(m: unknown): void;
         };
         const own = new Set(ownIds);
+        const isMetaAi = (id?: string): boolean => !!id && id.split("@")[0] === metaAi;
         const send = (msg: RawMsgModel): void => {
-          if (msg?.id?.fromMe !== true) return; // only a real boolean true is an outgoing message
-          // Only the own chat leaves the page (the store also changes for every ack in every chat).
-          const ids = [msg.id.remote?._serialized, msg.to?._serialized];
-          if (!ids.some((id) => id && own.has(id))) return;
+          if (!msg?.id?._serialized) return;
+          const fromMe = msg.id.fromMe === true; // only a real boolean true is an outgoing message
+          // Only the own chat (your messages) and Meta AI's replies leave the page
+          // (the store also changes for every ack in every chat).
+          const ownChat = fromMe && [msg.id.remote?._serialized, msg.to?._serialized].some((id) => id && own.has(id));
+          const metaAiReply = !fromMe && [msg.id.remote?._serialized, msg.from?._serialized].some(isMetaAi);
+          if (!ownChat && !metaAiReply) return;
           w.routineChatMessage({
-            id: msg.id._serialized, fromMe: true, type: msg.type, body: msg.body ?? "",
+            id: msg.id._serialized, fromMe, type: msg.type, body: msg.body ?? "",
             chat: msg.id.remote?._serialized ?? "",
             to: msg.to?._serialized ?? "", from: msg.from?._serialized ?? "", t: msg.t ?? 0,
           });
@@ -326,14 +376,14 @@ export class WhatsAppGateway implements ChatGateway {
         w.WPP.whatsapp.MsgStore.on("add", send);
         // Any change: encrypted messages arrive as "ciphertext" and get their type/body when decrypted.
         w.WPP.whatsapp.MsgStore.on("change", send);
-      }, [...this.#ownIds]);
+      }, [...this.#ownIds], META_AI_NUMBER);
       this.#log("info", "listening to the message store");
     } catch (e) {
       this.#log("error", `could not attach the message-store listener: ${(e as Error).message}`);
     }
   }
 
-  async #pollOwnChat(client: Whatsapp): Promise<void> {
+  async #pollChats(client: Whatsapp): Promise<void> {
     if (this.#polling || !this.#client) return;
     this.#polling = true;
     try {
@@ -346,9 +396,9 @@ export class WhatsAppGateway implements ChatGateway {
             const msgs = await w.WPP.chat.getMessages(chatId, { count: 5 });
             notes.push(`${chatId}: ok`);
             for (const msg of msgs) {
-              if (msg?.id?.fromMe !== true) continue;
+              if (!msg?.id?._serialized) continue;
               out.push({
-                id: msg.id._serialized, fromMe: true, type: msg.type, body: msg.body ?? "",
+                id: msg.id._serialized, fromMe: msg.id.fromMe === true, type: msg.type, body: msg.body ?? "",
                 chat: msg.id.remote?._serialized ?? chatId,
                 to: msg.to?._serialized ?? "", from: msg.from?._serialized ?? "", t: msg.t ?? 0,
               });
@@ -358,17 +408,17 @@ export class WhatsAppGateway implements ChatGateway {
           }
         }
         return { messages: out as RawMessage[], diag: notes.join(" · ") };
-      }, [...this.#ownIds]);
+      }, [...this.#ownIds, ...META_AI_CHAT_IDS]);
       if (diag !== this.#lastPollDiag) {
         this.#lastPollDiag = diag;
-        this.#log("info", `own-chat check: ${diag}`);
+        this.#log("info", `chat check: ${diag}`);
       }
       for (const m of messages) await this.#dispatch(client, { ...m, source: "poll" });
     } catch (e) {
       const diag = `failed: ${(e as Error)?.message ?? e}`;
       if (diag !== this.#lastPollDiag) {
         this.#lastPollDiag = diag;
-        this.#log("error", `own-chat check ${diag}`);
+        this.#log("error", `chat check ${diag}`);
       }
     } finally {
       this.#polling = false;
@@ -400,6 +450,8 @@ export class WhatsAppGateway implements ChatGateway {
   async #shutdown(clearSession: boolean): Promise<void> {
     if (this.#pollTimer) clearInterval(this.#pollTimer);
     this.#pollTimer = null;
+    for (const { timer } of this.#metaAiPending.values()) clearTimeout(timer);
+    this.#metaAiPending.clear();
     const client = this.#client;
     const browser = this.#browser;
     this.#client = null;

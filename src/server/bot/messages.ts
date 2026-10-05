@@ -62,7 +62,7 @@ export function confirmApprovalMessage(repo: string, pull: GhPull, ttlSeconds: n
     `⚠️ *Approve PR #${pull.number}* in ${repo}?`,
     `“${truncate(pull.title, 120)}” by ${pull.user.login}`,
     "",
-    `Reply *yes* to approve or *no* to cancel (expires in ${Math.round(ttlSeconds / 60)} min).`,
+    `Reply *yes* (or */yes*) to approve, anything else cancels (expires in ${Math.round(ttlSeconds / 60)} min).`,
   ].join("\n"));
 }
 

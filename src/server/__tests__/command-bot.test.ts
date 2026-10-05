@@ -82,6 +82,12 @@ test("/approve asks for confirmation and approves on yes, pinned to the commit",
   assert.match(sent[1], /Approved/);
 });
 
+test("/approve accepts /yes (the answer Meta AI repeats)", async () => {
+  await say("/approve 16");
+  await say("/yes");
+  assert.deepEqual(approved, ["me/game#16@abc123"]);
+});
+
 test("/approve is cancelled by no, by any other answer, and after expiry", async () => {
   await say("/approve 16");
   await say("no");

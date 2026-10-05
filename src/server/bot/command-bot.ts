@@ -105,7 +105,8 @@ export class CommandBot {
     const pending = this.#pending.get(chatId)!;
     this.#pending.delete(chatId);
     if (this.#now() > pending.expiresAt) return this.#reply(chatId, messages.expired());
-    const answer = text.toLowerCase().replace(/[.!¡]/g, "").trim();
+    // "/yes" is accepted too: through Meta AI every answer has to be a command.
+    const answer = text.toLowerCase().replace(/[.!¡/]/g, "").trim();
     if (!YES.has(answer)) return this.#reply(chatId, messages.cancelled());
     const provider = await this.#requirePulls(chatId);
     if (!provider) return;

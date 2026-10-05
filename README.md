@@ -95,7 +95,7 @@ flowchart LR
 ```
 
 - **Routines from the chat UI:** each message goes to the server, which fires the routine with the conversation's trigger ID and token. The call is made server-side, so browser CORS rules don't get in the way.
-- **WhatsApp bot:** the server runs WhatsApp Web in a headless Chrome through [WPPConnect](https://github.com/wppconnect-team/wppconnect) (Puppeteer), linked to your phone with a QR code. It reads the commands you write in your own chat and replies there. The browser profile is kept, so you only scan the QR once.
+- **WhatsApp bot:** the server runs WhatsApp Web in a headless Chrome through [WPPConnect](https://github.com/wppconnect-team/wppconnect) (Puppeteer), linked to your phone with a QR code. You ask Meta AI to repeat a command, the bot runs the command in Meta AI's reply, and it answers in your own chat. The browser profile is kept, so you only scan the QR once.
 - **One GitHub token:** it is stored encrypted on the server and shared by the Pull requests view (which calls `api.github.com` from the browser) and the WhatsApp bot.
 
 The request sent to fire a routine is equivalent to:
@@ -116,7 +116,11 @@ curl -X POST https://api.anthropic.com/v1/claude_code/routines/$TRIGGER_ID/fire 
 1. Open **WhatsApp** in the sidebar and click **Link WhatsApp**.
 2. On your phone go to **WhatsApp → Settings → Linked devices → Link a device**, and scan the QR code.
 3. Make sure a **GitHub token** is set. The app uses one token for everything: if you already entered it in Pull requests, the bot uses it too.
-4. Open your own chat (**“Message yourself”**) and send `/help`.
+4. Open the **Meta AI** chat and ask it to repeat a command, in any language:
+   `Repeat exactly this text, without adding anything else: /help`
+   The bot runs the command Meta AI repeats and replies in your own chat (**“Message yourself”**). The WhatsApp panel shows this message in the app's language, with a copy button.
+
+**Why Meta AI?** WhatsApp Web reliably reports messages you *receive*, but often not the ones you type on your phone. When Meta AI repeats your command, it arrives as a received message. Commands typed directly in your own chat still work when WhatsApp Web reports them.
 
 ### Default commands
 
@@ -125,15 +129,15 @@ curl -X POST https://api.anthropic.com/v1/claude_code/routines/$TRIGGER_ID/fire 
 | `/help` | Lists the enabled commands. |
 | `/prs` | Lists your open pull requests with their numbers. |
 | `/pr 16` | Shows PR #16, well formatted: description, branches, stats, files and link. Also accepts `/pr#16`, `/pr repo#16`, `/pr owner/repo#16` or a PR URL. |
-| `/approve 16` | Asks **“Approve PR #16 in owner/repo? Reply yes or no”** first. Only `yes` approves; anything else cancels. The confirmation expires after 2 minutes, and the approval is pinned to the commit you were shown. |
+| `/approve 16` | Asks **“Approve PR #16 in owner/repo? Reply yes or no”** first. Only `yes` approves (through Meta AI, ask it to repeat `/yes`); anything else cancels. The confirmation expires after 2 minutes, and the approval is pinned to the commit you were shown. |
 | `/routine <task>` | Fires a routine with the rest of the message, e.g. `/routine create a branch from main and fix the login bug`. Disabled until you set its Trigger ID and token. |
 
 Commands ship in English. In **WhatsApp → Commands** you can rename them, disable them, and add as many routine commands as you like (`/fix`, `/docs`, `/release`, each with its own routine). There is a shortcut to copy the trigger ID and token from a chat conversation.
 
 ### Safety rules
 
-- **Only your own chat counts.** The bot reads only messages you write in your own chat. Messages from other people and groups are ignored, so nobody else can run commands.
-- **Notes stay notes.** Messages that don't start with `/` are ignored, so you can keep using the chat for notes.
+- **Only you can send commands.** The bot reads Meta AI's replies in your account (only you write to Meta AI from it) and the messages you write in your own chat. Messages from other people and groups are ignored, so nobody else can run commands.
+- **Notes stay notes.** Messages (and Meta AI replies) that don't contain a `/command` are ignored, so you can keep using the chat for notes.
 - **Approvals always need a yes.** An approval is never executed without an explicit `yes`.
 - **No self-approval.** GitHub doesn't allow approving your own PRs. The bot refuses those up front.
 

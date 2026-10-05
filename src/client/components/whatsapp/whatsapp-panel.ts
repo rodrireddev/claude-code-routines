@@ -47,6 +47,7 @@ export class WhatsAppPanel extends HTMLElement {
         .cmd .routine { display:grid; grid-template-columns:1fr 1fr auto; gap:var(--sl-spacing-small); align-items:end; }
         @media (max-width:700px) { .cmd .head, .cmd .routine { grid-template-columns:1fr; } }
         code { font-family:var(--sl-font-mono); }
+        code.example { padding:var(--sl-spacing-x-small) var(--sl-spacing-small); border-radius:var(--sl-border-radius-medium); background:var(--sl-color-neutral-100); }
         [hidden] { display:none !important; }
         .log { display:grid; gap:4px; max-height:280px; overflow:auto; font-size:var(--sl-font-size-small); }
         .act { display:grid; grid-template-columns:auto auto 1fr; gap:var(--sl-spacing-x-small); align-items:baseline; }
@@ -144,7 +145,11 @@ export class WhatsAppPanel extends HTMLElement {
       const img = h("img", { class: "qr", src: s.qr, alt: "QR", width: "240", height: "240" });
       children.push(h("div", { class: "muted" }, t("wa.qrHelp")), img);
     }
-    if (s.status === "connected") children.push(h("div", { class: "muted" }, t("wa.howto")));
+    if (s.status === "connected") {
+      const example = `${t("wa.metaPrompt")} /help`;
+      const copy = h("sl-copy-button", { value: example, "copy-label": t("wa.copy") });
+      children.push(h("div", { class: "muted" }, t("wa.howto")), h("div", { class: "row" }, h("code", { class: "example" }, example), copy));
+    }
     if (s.error) children.push(h("div", { class: "err" }, s.error));
 
     const actions = h("div", { class: "row" });
