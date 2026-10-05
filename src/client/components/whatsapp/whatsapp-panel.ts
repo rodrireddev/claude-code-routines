@@ -146,7 +146,7 @@ export class WhatsAppPanel extends HTMLElement {
       children.push(h("div", { class: "muted" }, t("wa.qrHelp")), img);
     }
     if (s.status === "connected") {
-      const example = `${t("wa.metaPrompt")} /help`;
+      const example = "/help";
       const copy = h("sl-copy-button", { value: example, "copy-label": t("wa.copy") });
       children.push(h("div", { class: "muted" }, t("wa.howto")), h("div", { class: "row" }, h("code", { class: "example" }, example), copy));
     }

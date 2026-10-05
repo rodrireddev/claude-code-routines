@@ -82,7 +82,7 @@ test("/approve asks for confirmation and approves on yes, pinned to the commit",
   assert.match(sent[1], /Approved/);
 });
 
-test("/approve accepts /yes (the answer Meta AI repeats)", async () => {
+test("/approve accepts /yes (answers can be typed as commands)", async () => {
   await say("/approve 16");
   await say("/yes");
   assert.deepEqual(approved, ["me/game#16@abc123"]);

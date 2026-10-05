@@ -45,7 +45,7 @@
   },
   "dependencies": {
     "@shoelace-style/shoelace": "^2.20.1",
-    "@wppconnect-team/wppconnect": "^1.41.3",
+    "@wppconnect-team/wppconnect": "^2.3.4",
     "puppeteer": "^24.43.1",
     "qrcode": "^1.5.4"
   },
