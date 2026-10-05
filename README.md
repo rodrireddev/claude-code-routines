@@ -4,7 +4,7 @@
 
 # Routine Chat
 
-**A chat-style desktop & web client for firing Claude Code Routines and reviewing the GitHub pull requests they produce — also from WhatsApp.**
+**An open-source chat-style desktop & web client for running Claude Code Routines, reviewing their GitHub pull requests, and controlling them from WhatsApp.**
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Electron](https://img.shields.io/badge/Electron-desktop-47848F?logo=electron&logoColor=white)](https://www.electronjs.org/)
