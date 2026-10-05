@@ -26,7 +26,7 @@
 - Every message you send **fires the routine** with your text and shows a link to the Claude Code session it started.
 - When the routine opens a pull request, you can **review, comment on and approve it** from the same app.
 
-- Link **WhatsApp** and do the same from your phone: `/prs`, `/pr 16`, `/approve 16` (with a yes/no confirmation) or `/fix <task>` to fire a routine.
+- Link **WhatsApp** and do the same from your phone: `/prs`, `/pr 16`, `/approve 16` (with a yes/no confirmation) or `/routine <task>` to fire a routine.
 
 It runs **on your machine** (desktop app or `localhost`) or on **your own server** with login, encrypted storage and hardened HTTP. Your tokens never touch a third-party service.
 
@@ -63,7 +63,7 @@ It runs **on your machine** (desktop app or `localhost`) or on **your own server
 
 ## Quick start
 
-**Requirements:** Node.js 22.9+ and npm. The WhatsApp bot uses your installed **Google Chrome** (or the Chrome Puppeteer downloads on `npm install`, or `PUPPETEER_EXECUTABLE_PATH`).
+**Requirements:** Node.js 22.9+ and npm. The WhatsApp bot uses your installed **Google Chrome** (or the Chrome Puppeteer downloads on `npm install`, or the one in `PUPPETEER_EXECUTABLE_PATH`).
 
 ```bash
 git clone https://github.com/rodrireddev/github-routine-api.git
@@ -138,6 +138,46 @@ Commands ship in English. In **WhatsApp → Commands** you can rename them, disa
 - **No self-approval.** GitHub doesn't allow approving your own PRs. The bot refuses those up front.
 
 > ⚠️ WPPConnect automates WhatsApp Web, which is not an official WhatsApp API and may break when WhatsApp changes. WhatsApp could restrict accounts that automate it. Link an account you are comfortable using this way.
+
+## Dependency security (Puppeteer override)
+
+The WhatsApp bot needs [WPPConnect](https://github.com/wppconnect-team/wppconnect) 2.x (it drives WhatsApp Web through [wa-js](https://github.com/wppconnect-team/wa-js)) and [Puppeteer](https://pptr.dev). WPPConnect 2.x is required because its newer wa-js reports the messages you type in your own chat reliably.
+
+**The problem.** `npm audit` reported 5 high findings, all from one chain:
+
+```
+@wppconnect-team/wppconnect          (asks for puppeteer ^24; no flaw of its own)
+└─ puppeteer 24 → @puppeteer/browsers 2.x
+   └─ extract-zip 2.0.1              ← abandoned; GHSA-jmr9-qjv8-65gv, GHSA-7pqw-9j4j-h8q3
+```
+
+`extract-zip` can write files outside its target through symlinks in a zip. It only runs when a Chrome zip is downloaded and unpacked (Puppeteer's install script), not when launching an installed browser, so the practical exposure was small. Puppeteer **25.12** no longer uses it, but it is a major version that WPPConnect does not accept, so `npm audit fix` cannot apply it.
+
+**The fix: an npm `override`.** `package.json` forces Puppeteer 25 for the whole dependency tree:
+
+```json
+"dependencies": { "puppeteer": "^25.12.0" },
+"overrides":    { "puppeteer": "^25.12.0" }
+```
+
+- `overrides` replaces a package's version everywhere in the tree, ignoring the range each dependent declares. WPPConnect and `puppeteer-extra` therefore resolve to the same single Puppeteer 25 as this app (all `deduped`).
+- The direct dependency must use the same range as the override, otherwise npm fails with `EOVERRIDE`.
+- It only changes what gets installed; WPPConnect's code is unchanged and was written for Puppeteer 24. That is why the combination was verified live (QR session resume, a command typed in the own chat received and answered), and why each bump must be re-tested.
+- Result: `npm audit` goes from 5 high to **0**. Other overrides (`rimraf`, `basic-ftp`, `sharp`) are explained in [CONTRIBUTING.md](CONTRIBUTING.md#dependency-overrides).
+
+**Verify**
+
+```bash
+npm install
+npm ls puppeteer   # every entry 25.x and "deduped"
+npm audit          # found 0 vulnerabilities
+```
+
+Then link WhatsApp and type one command in your own chat. Test with very few messages: repeated automated sends can get the account restricted.
+
+**Maintenance.** Remove the override when WPPConnect depends on Puppeteer ≥ 25.12 (`npm view @wppconnect-team/wppconnect dependencies.puppeteer`). WPPConnect still pulls unmaintained packages (`puppeteer-extra` and its stealth plugin, last released in 2023); they have no advisories today. `@wppconnect/wa-js` has no dependencies. The `Dockerfile` skips the Chrome download (`PUPPETEER_SKIP_DOWNLOAD=1`) and uses the system Chromium.
+
+**Testing locally without touching your real session:** `PORT=47399 DATA_DIR=./data-test npm start` (keep `data-test/` git-ignored; it keeps the linked session so you don't rescan the QR).
 
 ## Reviewing pull requests
 

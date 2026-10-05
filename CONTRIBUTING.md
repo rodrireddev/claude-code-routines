@@ -43,8 +43,9 @@ See the [README](README.md#project-structure) for a file-by-file overview.
 | `rimraf` → 6 | v3 is deprecated and pulls `glob@7` + `inflight` (memory leak). WPPConnect only uses it in code paths this app doesn't run (ffmpeg audio conversion, Puppeteer's profile plugin; we launch the browser ourselves). |
 | `basic-ftp` → 6.2.2 | Fixes a DoS advisory (only reachable through FTP proxy URLs, which we never use). |
 | `sharp` → 0.35.5 | Fixes libvips/libheif advisories (WPPConnect uses it only for stickers). |
+| `puppeteer` → ^25.12.0 | WPPConnect asks for Puppeteer 24, whose `@puppeteer/browsers` pulls the vulnerable, abandoned `extract-zip` (two high advisories). Puppeteer 25 no longer uses it. The direct dependency uses the same range (npm requires it). See [README → Dependency security](README.md#dependency-security-puppeteer-override). |
 
-`npm audit` still lists three issues with no compatible fix: `extract-zip` (no patched version exists; Puppeteer uses it only to unzip Chrome from Google when downloading it), and `file-type` / `got` inside WPPConnect (file sending and its update check, neither used here). Re-check them when upgrading WPPConnect.
+`npm audit` reports 0 vulnerabilities with these overrides. Re-run it on every dependency bump, and test the WhatsApp flow live after bumping WPPConnect, wa-js or Puppeteer. Drop an override once WPPConnect itself depends on a fixed version.
 
 `allowScripts` approves the install scripts of `puppeteer` (downloads Chrome), `sharp` (native binary) and `electron` (desktop runtime).
 
