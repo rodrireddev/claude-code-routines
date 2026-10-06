@@ -21,7 +21,11 @@ export interface GhPull {
   deletions?: number;
   changed_files?: number;
   mergeable_state?: string;
+  merged?: boolean;
 }
+export type MergeMethod = "merge" | "squash" | "rebase";
+export const MERGE_METHODS: MergeMethod[] = ["merge", "squash", "rebase"];
+export interface GhMergeResult { merged: boolean; sha: string; message: string }
 export interface GhFile { filename: string; status: string; additions: number; deletions: number; patch?: string }
 export interface GhReview { id: number; user: { login: string }; state: string; body: string; submitted_at?: string }
 export type ReviewEvent = "APPROVE" | "REQUEST_CHANGES" | "COMMENT";
@@ -231,6 +235,17 @@ export const submitReview = (t: string, repo: string, n: number, event: ReviewEv
     method: "POST",
     body: JSON.stringify({ event, body: body || undefined, commit_id: commitId }),
   });
+
+/**
+ * Merges a pull request. `commitId` is the head commit that was being looked at: GitHub refuses
+ * (409) if the branch moved in between, so new pushes are never merged blindly.
+ */
+export function mergePull(t: string, repo: string, n: number, method: MergeMethod, commitId: string) {
+  return gh<GhMergeResult>(t, `/repos/${repo}/pulls/${n}/merge`, {
+    method: "PUT",
+    body: JSON.stringify({ merge_method: method, sha: commitId }),
+  });
+}
 
 export interface Probe { path: string; status: number; headers: Record<string, string>; body: unknown }
 

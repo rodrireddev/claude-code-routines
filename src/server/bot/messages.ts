@@ -3,7 +3,7 @@
  * Bot replies start with 🤖 so they are easy to tell apart in the user's own chat.
  */
 import type { Command } from "../../shared/commands.js";
-import type { GhFile, GhPull, OpenPull } from "../../shared/github-api.js";
+import type { GhFile, GhPull, MergeMethod, OpenPull } from "../../shared/github-api.js";
 
 const MAX_BODY = 1500;
 const MAX_FILES = 15;
@@ -33,7 +33,7 @@ export function pullListMessage(pulls: OpenPull[], showTrigger: string | undefin
   return bot(`*Open pull requests (${pulls.length})*\n\n${items.join("\n\n")}${more}${hint}`);
 }
 
-export function pullDetailMessage(repo: string, pull: GhPull, files: GhFile[], approveTrigger: string | undefined): string {
+export function pullDetailMessage(repo: string, pull: GhPull, files: GhFile[], approveTrigger: string | undefined, mergeTrigger?: string): string {
   const fileLines = files.slice(0, MAX_FILES).map((f) => `• ${f.filename} (+${f.additions} −${f.deletions})`);
   if (files.length > MAX_FILES) fileLines.push(`…and ${files.length - MAX_FILES} more`);
   const body = pull.body?.trim() ? truncate(pull.body.trim(), MAX_BODY) : "_No description._";
@@ -54,6 +54,7 @@ export function pullDetailMessage(repo: string, pull: GhPull, files: GhFile[], a
     `🔗 ${pull.html_url}`,
   ];
   if (approveTrigger) parts.push("", `To approve: *${approveTrigger} ${repo}#${pull.number}*`);
+  if (mergeTrigger) parts.push("", `To merge: *${mergeTrigger} ${repo}#${pull.number}*`);
   return bot(parts.join("\n"));
 }
 
@@ -63,6 +64,18 @@ export function confirmApprovalMessage(repo: string, pull: GhPull, ttlSeconds: n
     `“${truncate(pull.title, 120)}” by ${pull.user.login}`,
     "",
     `Reply *yes* (or */yes*) to approve, anything else cancels (expires in ${Math.round(ttlSeconds / 60)} min).`,
+  ].join("\n"));
+}
+
+const METHOD_LABEL: Record<MergeMethod, string> = { merge: "merge commit", squash: "squash and merge", rebase: "rebase and merge" };
+
+export function confirmMergeMessage(repo: string, pull: GhPull, method: MergeMethod, ttlSeconds: number): string {
+  return bot([
+    `⚠️ *Merge PR #${pull.number}* in ${repo}?`,
+    `“${truncate(pull.title, 120)}” by ${pull.user.login}`,
+    `🌿 ${pull.head.ref} → ${pull.base.ref} (${METHOD_LABEL[method]})`,
+    "",
+    `Reply *yes* (or */yes*) to merge, anything else cancels (expires in ${Math.round(ttlSeconds / 60)} min).`,
   ].join("\n"));
 }
 
@@ -76,10 +89,13 @@ export const messages = {
   ambiguous: (number: number, repos: string[]) =>
     bot(`Several open PRs are #${number}:\n${repos.map((r) => `• ${r}#${number}`).join("\n")}\nSend it again with the repo, e.g. *${repos[0]}#${number}*.`),
   ownPull: () => bot("GitHub doesn't allow approving your own pull request. Ask someone else to approve it."),
-  notOpen: (state: string) => bot(`This pull request is ${state}; only open PRs can be approved.`),
+  notOpen: (state: string, verb = "approved") => bot(`This pull request is ${state}; only open PRs can be ${verb}.`),
+  merged: (repo: string, number: number, url: string) => bot(`✅ Merged *${repo}#${number}*.\n${url}`),
+  mergeDraft: () => bot("This pull request is a draft: mark it as ready for review before merging."),
+  mergeConflicts: () => bot("This pull request has merge conflicts: resolve them before merging."),
   approved: (repo: string, number: number, url: string) => bot(`✅ Approved *${repo}#${number}*.\n${url}`),
-  cancelled: () => bot("Approval cancelled. Nothing was changed."),
-  expired: () => bot("That confirmation expired. Nothing was changed; send the approve command again."),
+  cancelled: () => bot("Confirmation cancelled. Nothing was changed."),
+  expired: () => bot("That confirmation expired. Nothing was changed; send the command again."),
   routineNotConfigured: (trigger: string) =>
     bot(`*${trigger}* has no routine configured. Set its Trigger ID and token in the app (WhatsApp → Commands).`),
   routineStarted: (url?: string) => bot(`🚀 Routine started.${url ? `\nSession: ${url}` : ""}`),

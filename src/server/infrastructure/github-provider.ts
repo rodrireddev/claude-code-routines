@@ -1,4 +1,5 @@
 import * as gh from "../../shared/github-api.js";
+import type { MergeMethod } from "../../shared/github-api.js";
 import type { PullRequestProvider } from "../bot/ports.js";
 
 /** PullRequestProvider backed by the GitHub REST API and the token saved in the bot settings. */
@@ -27,5 +28,9 @@ export class GitHubPullRequests implements PullRequestProvider {
 
   async approve(repo: string, number: number, commitId: string): Promise<void> {
     await gh.submitReview(this.#token, repo, number, "APPROVE", "", commitId);
+  }
+
+  async merge(repo: string, number: number, commitId: string, method: MergeMethod): Promise<void> {
+    await gh.mergePull(this.#token, repo, number, method, commitId);
   }
 }

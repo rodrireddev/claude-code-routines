@@ -16,6 +16,7 @@ const pull = (over: Partial<GhPull> = {}): GhPull => ({
 
 let sent: string[];
 let approved: string[];
+let merged: string[];
 let fired: { triggerId: string; text: string }[];
 let open: OpenPull[];
 let current: GhPull;
@@ -28,10 +29,11 @@ const provider: PullRequestProvider = {
   listOpen: async () => open,
   get: async () => ({ pull: current, files: [{ filename: "a.ts", status: "modified", additions: 3, deletions: 1 }] }),
   approve: async (repo, number, sha) => void approved.push(`${repo}#${number}@${sha}`),
+  merge: async (repo, number, sha, method) => void merged.push(`${repo}#${number}@${sha}:${method}`),
 };
 
 beforeEach(() => {
-  sent = []; approved = []; fired = []; now = 0;
+  sent = []; approved = []; merged = []; fired = []; now = 0;
   open = [{ repo: "me/game", number: 16, title: "Fix login", draft: false, author: "alice", updatedAt: "2026-10-01" }];
   current = pull();
   commands = structuredClone(DEFAULT_COMMANDS);
@@ -106,6 +108,40 @@ test("refuses to approve your own PR", async () => {
   current = pull({ user: { login: "me" } });
   await say("/approve 16");
   assert.match(sent[0], /own pull request/);
+});
+
+test("/merge asks for confirmation and merges on yes, pinned to the commit (default: merge commit)", async () => {
+  await say("/merge 16");
+  assert.match(sent[0], /Merge PR #16[\s\S]*fix\/login → main \(merge commit\)/);
+  assert.equal(merged.length, 0);
+  await say("/yes");
+  assert.deepEqual(merged, ["me/game#16@abc123:merge"]);
+  assert.match(sent[1], /Merged/);
+});
+
+test("/merge takes the method as the last word and can merge your own PR", async () => {
+  current = pull({ user: { login: "me" } });
+  await say("/merge me/game#16 squash");
+  assert.match(sent[0], /squash and merge/);
+  await say("yes");
+  assert.deepEqual(merged, ["me/game#16@abc123:squash"]);
+});
+
+test("/merge is cancelled by anything but yes, and refuses drafts, conflicts and closed PRs", async () => {
+  await say("/merge 16");
+  await say("no");
+  assert.equal(merged.length, 0);
+  assert.match(sent[1], /cancelled/);
+  current = pull({ draft: true });
+  await say("/merge 16");
+  assert.match(sent[2], /draft/);
+  current = pull({ mergeable_state: "dirty" });
+  await say("/merge 16");
+  assert.match(sent[3], /conflicts/);
+  current = pull({ state: "closed", merged: true });
+  await say("/merge 16");
+  assert.match(sent[4], /already merged/);
+  assert.equal(merged.length, 0);
 });
 
 test("routine commands need configuration and pass the rest of the message", async () => {

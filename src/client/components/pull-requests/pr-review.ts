@@ -4,7 +4,7 @@ import { githubAuth } from "../../core/github-auth.js";
 import { diagnosticsDialog, manualReposDialog, pickReposDialog, type RepoContext } from "./pr-dialogs.js";
 import { lastRepo, readPrefs, rememberRepo, savePrefs } from "./repo-prefs.js";
 import * as gh from "../../services/github.js";
-import type { GhFile, GhPull, GhRepo, GhReview, ReviewEvent } from "../../services/github.js";
+import { MERGE_METHODS, type GhFile, type GhPull, type GhRepo, type GhReview, type MergeMethod, type ReviewEvent } from "../../services/github.js";
 import type { SlButton, SlInput, SlTextarea } from "../../core/types.js";
 
 interface SlSelect extends HTMLElement { value: string | string[]; disabled: boolean; placeholder: string }
@@ -426,7 +426,8 @@ export class PrReview extends HTMLElement {
   #renderDetail(repo: string, pull: GhPull, files: GhFile[], reviews: GhReview[], notice: string): void {
     const link = h("a", { href: pull.html_url, target: "_blank", rel: "noopener noreferrer" }, t("det.openGh"));
     const head = h("div", { class: "meta" },
-      h("sl-badge", { variant: pull.draft ? "neutral" : "success" }, pull.draft ? t("det.draft") : t("det.open")),
+      h("sl-badge", { variant: pull.merged ? "primary" : pull.state !== "open" ? "danger" : pull.draft ? "neutral" : "success" },
+        pull.merged ? t("det.mergedBadge") : pull.state !== "open" ? t("det.closedBadge") : pull.draft ? t("det.draft") : t("det.open")),
       h("span", {}, `#${pull.number} · ${pull.user.login} · ${ago(pull.created_at)}`),
       h("span", {}, `${pull.base.ref} ← ${pull.head.ref}`),
       h("span", {}, `+${pull.additions ?? 0} −${pull.deletions ?? 0} · ${t("det.files", { n: pull.changed_files ?? files.length })}`),
@@ -468,6 +469,7 @@ export class PrReview extends HTMLElement {
     if (own) { buttons[0].setAttribute("disabled", ""); buttons[1].setAttribute("disabled", ""); }
     const form = h("div", { class: "form" }, textarea, h("div", { class: "actions" }, ...buttons),
       own ? h("div", { class: "muted" }, t("det.own")) : null,
+      this.#mergeControls(repo, pull, status),
       status);
 
     this.#detailEl.replaceChildren(
@@ -475,6 +477,36 @@ export class PrReview extends HTMLElement {
       pull.body ? h("div", { class: "body" }, pull.body) : h("div", { class: "muted" }, t("det.noDesc")),
       ...(reviewsEl ? [reviewsEl] : []), filesEl, form);
     this.#detailEl.scrollTop = 0;
+  }
+
+  /** Method dropdown + Merge button. Only for open, non-draft PRs without conflicts. */
+  #mergeControls(repo: string, pull: GhPull, status: HTMLElement): HTMLElement {
+    const blocked = pull.state !== "open" || pull.draft || pull.mergeable_state === "dirty";
+    const method = h("sl-select", { value: "merge", size: "small", "aria-label": t("det.mergeMethod"), style: "min-width:200px" },
+      ...MERGE_METHODS.map((m) => h("sl-option", { value: m }, t(`det.method.${m}` as const)))) as unknown as SlSelect;
+    const button = h("sl-button", { variant: "primary" }, h("sl-icon", { slot: "prefix", name: "sign-merge-right" }), t("det.merge")) as unknown as HTMLElement & SlButton;
+    if (blocked) { button.setAttribute("disabled", ""); method.disabled = true; }
+    button.addEventListener("click", () => void this.#merge(repo, pull, String(method.value) as MergeMethod, status, button));
+    const why = pull.state !== "open" ? t("det.mergeClosed") : pull.draft ? t("det.mergeDraft") : pull.mergeable_state === "dirty" ? t("det.mergeConflicts") : "";
+    return h("div", { class: "form" },
+      h("div", { class: "actions" }, method, button),
+      why ? h("div", { class: "muted" }, why) : null);
+  }
+
+  async #merge(repo: string, pull: GhPull, method: MergeMethod, status: HTMLElement, button: SlButton): Promise<void> {
+    status.className = "err";
+    if (!confirm(t("det.confirmMerge", { n: pull.number, repo, method: t(`det.method.${method}` as const) }))) return;
+    button.loading = true;
+    status.textContent = "";
+    try {
+      // Pinned to the commit that was on screen: GitHub refuses if the branch moved since.
+      await gh.mergePull(githubAuth.token, repo, pull.number, method, pull.head.sha);
+      await this.#openPull(repo, pull.number, t("det.merged"));
+    } catch (e) {
+      status.textContent = (e as Error).message;
+    } finally {
+      button.loading = false;
+    }
   }
 
   async #submit(repo: string, pull: GhPull, event: ReviewEvent, textarea: SlTextarea, status: HTMLElement, buttons: SlButton[]): Promise<void> {

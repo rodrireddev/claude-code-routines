@@ -35,6 +35,17 @@ export class BotSettingsService {
   constructor(store: SecureStore<BotSettings>) {
     this.#store = store;
     this.#settings = store.read({ githubToken: "", commands: structuredClone(DEFAULT_COMMANDS) });
+    this.#addMissingMergeCommand();
+  }
+
+  /** Settings saved before /merge existed get it added (enabled; they can disable or rename it). */
+  #addMissingMergeCommand(): void {
+    const { commands } = this.#settings;
+    if (commands.some((c) => c.action === "merge_pr")) return;
+    const merge = structuredClone(DEFAULT_COMMANDS.find((c) => c.action === "merge_pr")!);
+    if (commands.some((c) => c.trigger === merge.trigger)) return; // the trigger is taken by another command
+    this.#settings = { ...this.#settings, commands: [...commands, merge] };
+    this.#save();
   }
 
   get(): BotSettings {

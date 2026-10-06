@@ -2,15 +2,17 @@
  * Chat commands for the WhatsApp bot. Shared by the server (which executes them) and the UI
  * (which lets the user edit them).
  */
+import type { MergeMethod } from "./github-api.js";
 
 export type CommandAction =
   | "help"        // list the available commands
   | "list_prs"    // list open pull requests
   | "show_pr"     // show one pull request in detail
   | "approve_pr"  // approve a pull request (always asks for confirmation)
+  | "merge_pr"    // merge a pull request (always asks for confirmation)
   | "run_routine"; // fire a Claude Code routine with the rest of the message
 
-export const COMMAND_ACTIONS: CommandAction[] = ["help", "list_prs", "show_pr", "approve_pr", "run_routine"];
+export const COMMAND_ACTIONS: CommandAction[] = ["help", "list_prs", "show_pr", "approve_pr", "merge_pr", "run_routine"];
 
 export interface RoutineTarget {
   triggerId: string;
@@ -40,6 +42,7 @@ export const DEFAULT_COMMANDS: Command[] = [
   { id: "prs", trigger: "/prs", action: "list_prs", description: "List your open pull requests", enabled: true },
   { id: "pr", trigger: "/pr", action: "show_pr", description: "Show a pull request: /pr 16 or /pr owner/repo#16", enabled: true },
   { id: "approve", trigger: "/approve", action: "approve_pr", description: "Approve a pull request (asks yes/no first): /approve 16", enabled: true },
+  { id: "merge", trigger: "/merge", action: "merge_pr", description: "Merge a pull request (asks yes/no first): /merge 16 [merge|squash|rebase]", enabled: true },
   {
     id: "routine",
     trigger: "/routine",
@@ -88,6 +91,15 @@ export function parsePullRef(input: string): PullRef | null {
   const ref = /^(?:([\w.-]+(?:\/[\w.-]+)?)(?:\s*#|\s+))?#?(\d+)$/.exec(s);
   if (ref) return { repo: ref[1] ?? "", number: Number(ref[2]) };
   return null;
+}
+
+/**
+ * Splits "16 squash" or "owner/repo#16 rebase" into the PR reference and the merge method
+ * (default "merge").
+ */
+export function parseMergeArgs(input: string): { ref: string; method: MergeMethod } {
+  const match = /^([\s\S]*?)\s+(merge|squash|rebase)$/i.exec(input.trim());
+  return match ? { ref: match[1], method: match[2].toLowerCase() as MergeMethod } : { ref: input.trim(), method: "merge" };
 }
 
 /** Checks a full command list coming from the browser. Returns an error message or null. */

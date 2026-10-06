@@ -26,7 +26,7 @@
 - Every message you send **fires the routine** with your text and shows a link to the Claude Code session it started.
 - When the routine opens a pull request, you can **review, comment on and approve it** from the same app.
 
-- Link **WhatsApp** and do the same from your phone: `/prs`, `/pr 16`, `/approve 16` (with a yes/no confirmation) or `/routine <task>` to fire a routine.
+- Link **WhatsApp** and do the same from your phone: `/prs`, `/pr 16`, `/approve 16` and `/merge 16` (both with a yes/no confirmation) or `/routine <task>` to fire a routine.
 
 It runs **on your machine** (desktop app or `localhost`) or on **your own server** with login, encrypted storage and hardened HTTP. Your tokens never touch a third-party service.
 
@@ -39,7 +39,7 @@ It runs **on your machine** (desktop app or `localhost`) or on **your own server
 | 💾 **Local history** | Conversations are persisted locally (browser / Electron storage). |
 | 🔐 **Optional encryption** | Lock your data with a passphrase: PBKDF2-SHA256 + AES-256-GCM via WebCrypto. |
 | 📱 **WhatsApp bot** | Scan a QR code and control routines and PRs from your own WhatsApp chat with configurable `/commands`. |
-| 🔍 **Pull request review** | See all your open PRs, read descriptions and diffs, then **Approve**, **Request changes** or **Comment**. |
+| 🔍 **Pull request review** | See all your open PRs, read descriptions and diffs, then **Approve**, **Request changes**, **Comment** or **Merge** (merge commit, squash or rebase). |
 | 🌗 **Light / dark / system theme** | One-click theme toggle, remembered between sessions. |
 | 🌍 **4 languages** | English (default), Español, Français and Português, switchable at any time. |
 | 🖥️ **Desktop, web or server** | Electron app, browser on `localhost`, or deployed on a server behind HTTPS with login. |
@@ -126,6 +126,7 @@ curl -X POST https://api.anthropic.com/v1/claude_code/routines/$TRIGGER_ID/fire 
 | `/prs` | Lists your open pull requests with their numbers. |
 | `/pr 16` | Shows PR #16, well formatted: description, branches, stats, files and link. Also accepts `/pr#16`, `/pr repo#16`, `/pr owner/repo#16` or a PR URL. |
 | `/approve 16` | Asks **“Approve PR #16 in owner/repo? Reply yes or no”** first. Only `yes` (or `/yes`) approves; anything else cancels. The confirmation expires after 2 minutes, and the approval is pinned to the commit you were shown. |
+| `/merge 16 [merge\|squash\|rebase]` | Asks **“Merge PR #16 in owner/repo?”** with the branches and the method (default: merge commit), and merges only on `yes` (or `/yes`). It refuses drafts, PRs with conflicts and closed PRs. Merging is pinned to the commit you were shown: if the branch changed in between, GitHub refuses and nothing is merged. Branch protection still applies. Works on your own PRs too. |
 | `/routine <task>` | Fires a routine with the rest of the message, e.g. `/routine create a branch from main and fix the login bug`. Disabled until you set its Trigger ID and token. |
 
 Commands ship in English. In **WhatsApp → Commands** you can rename them, disable them, and add as many routine commands as you like (`/fix`, `/docs`, `/release`, each with its own routine). There is a shortcut to copy the trigger ID and token from a chat conversation.
@@ -134,7 +135,7 @@ Commands ship in English. In **WhatsApp → Commands** you can rename them, disa
 
 - **Only you can send commands.** The bot only reads the messages you write in your own chat. Messages from other people and groups are ignored, so nobody else can run commands.
 - **Notes stay notes.** Messages that don't contain a `/command` are ignored, so you can keep using the chat for notes.
-- **Approvals always need a yes.** An approval is never executed without an explicit `yes`.
+- **Approvals and merges always need a yes.** They are never executed without an explicit `yes`.
 - **No self-approval.** GitHub doesn't allow approving your own PRs. The bot refuses those up front.
 
 > ⚠️ WPPConnect automates WhatsApp Web, which is not an official WhatsApp API and may break when WhatsApp changes. WhatsApp could restrict accounts that automate it. Link an account you are comfortable using this way.
@@ -187,13 +188,15 @@ Open **Pull requests** at the bottom of the sidebar and paste a GitHub token. Th
 - paste a PR URL (or `owner/repo#123`) to open it directly;
 - use **Diagnostics** to see GitHub's raw responses for your token.
 
-Reviews are pinned to the commit you were looking at and ask for confirmation before being sent.
+Reviews and merges are pinned to the commit you were looking at and ask for confirmation before being sent.
+
+**Merging.** The **Merge** button (with a method selector) is available on open, non-draft PRs without conflicts. Unlike approving, you can merge your own PRs: GitHub only forbids *approving* them, so for PRs opened by your account (the usual case with routines) approve is disabled and merge still works, unless the branch's protection rules require another person's approval or passing checks. The token needs **Pull requests: Read and write** and **Contents: Read and write** (fine-grained) or the `repo` scope (classic).
 
 ### Which token should I use?
 
 | Token type | Setup | Pros | Cons |
 |---|---|---|---|
-| **Fine-grained PAT** *(recommended)* | Resource owner = you (or your org). Repository access = the repos to review. Permissions: **Pull requests: Read and write**, **Contents: Read-only**. | Least privilege: limited to the repos and permissions you choose. | GitHub has no API to list "the repos this token can access". Private repos the token wasn't granted return **404**. |
+| **Fine-grained PAT** *(recommended)* | Resource owner = you (or your org). Repository access = the repos to review. Permissions: **Pull requests: Read and write**, **Contents: Read-only** (**Read and write** if you want to merge). | Least privilege: limited to the repos and permissions you choose. | GitHub has no API to list "the repos this token can access". Private repos the token wasn't granted return **404**. |
 | **Classic PAT** | Scope **`repo`**. Use a short expiration. | Sees every private repo your user can access. Works out of the box. | Broad access to all your repositories. |
 
 > GitHub does not allow approving (or requesting changes on) **your own** pull requests. Routine Chat disables those buttons on PRs authored by the token's user.
@@ -312,7 +315,7 @@ src/
 - [ ] Show the routine's final output in the chat (the fire endpoint only returns the session link)
 - [ ] Packaged desktop installers (Windows / macOS / Linux)
 - [ ] Inline review comments on specific diff lines
-- [ ] More bot commands (request changes, merge, routine status)
+- [ ] More bot commands (request changes, routine status)
 - Fine-grained tokens can't enumerate their own repositories (a GitHub API limitation). See [Which token should I use?](#which-token-should-i-use)
 
 ## Contributing

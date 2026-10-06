@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { DEFAULT_COMMANDS, normalizeTrigger, parseCommand, parsePullRef, validateCommands } from "../../shared/commands.js";
+import { DEFAULT_COMMANDS, normalizeTrigger, parseCommand, parseMergeArgs, parsePullRef, validateCommands } from "../../shared/commands.js";
 
 test("parseCommand accepts spaces, # and no arguments", () => {
   assert.deepEqual(parseCommand("/pr 16"), { trigger: "/pr", args: "16" });
@@ -25,4 +25,11 @@ test("normalizeTrigger and validateCommands", () => {
   assert.equal(normalizeTrigger("/bad trigger"), null);
   assert.equal(validateCommands(DEFAULT_COMMANDS), null);
   assert.match(validateCommands([...DEFAULT_COMMANDS, { ...DEFAULT_COMMANDS[0], id: "x" }])!, /Duplicate/);
+});
+
+test("parses the merge method from the end of the arguments", () => {
+  assert.deepEqual(parseMergeArgs("16"), { ref: "16", method: "merge" });
+  assert.deepEqual(parseMergeArgs("16 squash"), { ref: "16", method: "squash" });
+  assert.deepEqual(parseMergeArgs("owner/repo#16 REBASE"), { ref: "owner/repo#16", method: "rebase" });
+  assert.deepEqual(parseMergeArgs("repo 16"), { ref: "repo 16", method: "merge" });
 });

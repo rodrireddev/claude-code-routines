@@ -1,7 +1,8 @@
-import { parseCommand, parsePullRef, type Command, type CommandAction } from "../../shared/commands.js";
-import type { GhPull } from "../../shared/github-api.js";
+import { parseCommand, parseMergeArgs, parsePullRef, type Command, type CommandAction } from "../../shared/commands.js";
+import type { GhPull, MergeMethod } from "../../shared/github-api.js";
 import {
   confirmApprovalMessage,
+  confirmMergeMessage,
   helpMessage,
   messages,
   pullDetailMessage,
@@ -20,9 +21,12 @@ export interface CommandBotDeps {
   confirmationTtlMs?: number;
 }
 
-interface PendingApproval {
+/** An approve or merge waiting for the user's yes/no. */
+interface PendingAction {
+  kind: "approve" | "merge";
   repo: string;
   pull: GhPull;
+  method: MergeMethod;
   expiresAt: number;
 }
 
@@ -36,7 +40,7 @@ const NO = new Set(["no", "n", "not", "nope", "cancel"]);
  */
 export class CommandBot {
   readonly #deps: CommandBotDeps;
-  readonly #pending = new Map<string, PendingApproval>();
+  readonly #pending = new Map<string, PendingAction>();
   readonly #now: () => number;
   readonly #ttl: number;
 
@@ -76,7 +80,7 @@ export class CommandBot {
         const target = await this.#resolvePull(chatId, command, args);
         if (!target) return;
         const { pull, files } = await target.provider.get(target.repo, target.number);
-        return this.#reply(chatId, pullDetailMessage(target.repo, pull, files, this.#trigger("approve_pr")));
+        return this.#reply(chatId, pullDetailMessage(target.repo, pull, files, this.#trigger("approve_pr"), this.#trigger("merge_pr")));
       }
       case "approve_pr": {
         const target = await this.#resolvePull(chatId, command, args);
@@ -84,8 +88,20 @@ export class CommandBot {
         const { pull } = await target.provider.get(target.repo, target.number);
         if (pull.state !== "open") return this.#reply(chatId, messages.notOpen(pull.state));
         if (pull.user.login === (await target.provider.login())) return this.#reply(chatId, messages.ownPull());
-        this.#pending.set(chatId, { repo: target.repo, pull, expiresAt: this.#now() + this.#ttl });
+        this.#pending.set(chatId, { kind: "approve", repo: target.repo, pull, method: "merge", expiresAt: this.#now() + this.#ttl });
         return this.#reply(chatId, confirmApprovalMessage(target.repo, pull, this.#ttl / 1000));
+      }
+      case "merge_pr": {
+        // "/merge 16 squash": the last word may be the merge method.
+        const { ref, method } = parseMergeArgs(args);
+        const target = await this.#resolvePull(chatId, command, ref);
+        if (!target) return;
+        const { pull } = await target.provider.get(target.repo, target.number);
+        if (pull.state !== "open") return this.#reply(chatId, messages.notOpen(pull.merged ? "already merged" : pull.state, "merged"));
+        if (pull.draft) return this.#reply(chatId, messages.mergeDraft());
+        if (pull.mergeable_state === "dirty") return this.#reply(chatId, messages.mergeConflicts());
+        this.#pending.set(chatId, { kind: "merge", repo: target.repo, pull, method, expiresAt: this.#now() + this.#ttl });
+        return this.#reply(chatId, confirmMergeMessage(target.repo, pull, method, this.#ttl / 1000));
       }
       case "run_routine": {
         const routine = command.routine;
@@ -100,7 +116,7 @@ export class CommandBot {
     }
   }
 
-  /** Handles the yes/no answer. Any other answer cancels: approving by mistake is worse than retyping. */
+  /** Handles the yes/no answer. Any other answer cancels: approving or merging by mistake is worse than retyping. */
   async #answerConfirmation(chatId: string, text: string): Promise<void> {
     const pending = this.#pending.get(chatId)!;
     this.#pending.delete(chatId);
@@ -110,9 +126,14 @@ export class CommandBot {
     if (!YES.has(answer)) return this.#reply(chatId, messages.cancelled());
     const provider = await this.#requirePulls(chatId);
     if (!provider) return;
-    // Pinned to the commit shown when confirming: new pushes in between are not approved blindly.
-    await provider.approve(pending.repo, pending.pull.number, pending.pull.head.sha);
-    await this.#reply(chatId, messages.approved(pending.repo, pending.pull.number, pending.pull.html_url));
+    // Pinned to the commit shown when confirming: new pushes in between are not approved or merged blindly.
+    const { repo, pull } = pending;
+    if (pending.kind === "merge") {
+      await provider.merge(repo, pull.number, pull.head.sha, pending.method);
+      return this.#reply(chatId, messages.merged(repo, pull.number, pull.html_url));
+    }
+    await provider.approve(repo, pull.number, pull.head.sha);
+    await this.#reply(chatId, messages.approved(repo, pull.number, pull.html_url));
   }
 
   /** Finds the PR referenced by "16", "repo#16", "owner/repo#16" or a URL. */
